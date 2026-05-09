@@ -622,6 +622,133 @@ else
     ok "Bash hook already present in ~/.bashrc"
 fi
 
+# ───────────── 3b. picom config ─────────────
+section "Installing FT-Labs-picom config"
+mkdir -p "$HOME/.config/picom"
+if [ -e "$HOME/.config/picom/picom.conf" ]; then
+    ok "picom.conf already exists — left untouched (delete it and re-run to refresh)"
+else
+    cat > "$HOME/.config/picom/picom.conf" <<'_END_'
+#################################
+#             Shadows           #
+#################################
+
+shadow-radius = 7;
+
+# The opacity of shadows. (0.0 - 1.0, defaults to 0.75)
+# shadow-opacity = .75
+
+# The left offset for shadows, in pixels. (defaults to -15)
+# shadow-offset-x = -15
+shadow-offset-x = -7;
+
+# The top offset for shadows, in pixels. (defaults to -15)
+# shadow-offset-y = -15
+shadow-offset-y = -7;
+
+# Specify a list of conditions of windows that should have no shadow.
+shadow-exclude = [
+  "name = 'Notification'",
+  "class_g ?= 'Notify-osd'",
+  "_GTK_FRAME_EXTENTS@:c"
+];
+
+#################################
+#           Fading              #
+#################################
+
+fading = true;
+fade-in-step = 0.03;
+fade-out-step = 0.03;
+
+#################################
+#   Transparency / Opacity      #
+#################################
+
+inactive-opacity = 1
+frame-opacity = 1.0
+inactive-opacity-override = false;
+
+# Per-class opacity rules.  Add classes as needed.
+opacity-rule = [ "98:class_g = 'kitty'"];
+
+#################################
+#           Corners             #
+#################################
+
+corner-radius = 0
+
+rounded-corners-exclude = [
+  "window_type = 'dock'",
+  "window_type = 'desktop'"
+];
+
+
+#################################
+#     Background-Blurring       #
+#################################
+
+blur-kern = "3x3box";
+
+blur-background-exclude = [
+  "window_type = 'dock'",
+  "window_type = 'desktop'",
+  "_GTK_FRAME_EXTENTS@:c"
+];
+
+#################################
+#          Animations           #
+#################################
+
+# Enables window animations (FT Labs picom only)
+animations = true;
+
+# Animation settings for window movement/resizing
+animation-stiffness = 125;        # How "springy" the animation is (lower = more spring)
+animation-window-mass = 1.2;      # Window mass (higher = slower movement)
+animation-dampening = 25;         # How quickly animation settles (higher = faster settle)
+animation-clamping = true;        # Clamp animations (kills bouncy overshoot)
+
+# Animation presets:
+# "none", "fly-in", "zoom", "slide-up", "slide-down", "slide-left", "slide-right"
+animation-for-open-window = "zoom";
+animation-for-unmap-window = "zoom";
+
+animation-exclude = [
+  "class_g = 'slop'",
+];
+
+#################################
+#       General Settings        #
+#################################
+
+# `xrender`, `glx`, `egl` or `xr_glx_hybrid`.  glx for animation perf.
+backend = "glx";
+
+dithered-present = false;
+vsync = true;
+
+mark-wmwin-focused = true;
+mark-ovredir-focused = true;
+detect-rounded-corners = true;
+detect-client-opacity = true;
+detect-transient = true;
+use-damage = true;
+
+log-level = "warn";
+
+wintypes:
+{
+  tooltip = { fade = true; shadow = true; opacity = 0.95; focus = true; full-shadow = false; };
+  dock = { shadow = false; clip-shadow-above = true; }
+  dnd = { shadow = false; }
+  popup_menu = { opacity = 0.95; }
+  dropdown_menu = { opacity = 0.95; }
+};
+_END_
+    ok "Wrote ~/.config/picom/picom.conf (FT-Labs-picom flavor with animations)"
+fi
+
 # ───────────── 4. seed colorscheme cache ─────────────
 section "Seeding default colorscheme (Monokai Pro)"
 "$HOME/scripts/dwm-blocks/sync-colors.sh" monokai >>"$LOG" 2>&1 \

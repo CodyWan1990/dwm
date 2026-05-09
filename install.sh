@@ -804,14 +804,19 @@ trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true' EXIT INT TERM
 # Substitute the __USER_HOME__ placeholder (and any stale /home/codywan literals
 # from upstream) with the current user's $HOME in every config*.h file in the
 # given directory. Idempotent: runs every build, no-ops once placeholders are
-# resolved.
+# resolved.  Uses if/then/fi rather than `[ -f ] &&` so a missing file in a
+# package without config.h (e.g. dfm) doesn't trip `set -e` and silently kill
+# the installer.
 substitute_paths() {
     for f in "$1"/config.def.h "$1"/config.h; do
-        [ -f "$f" ] && sed -i \
-            -e "s|__USER_HOME__|$HOME|g" \
-            -e "s|/home/codywan|$HOME|g" \
-            "$f"
+        if [ -f "$f" ]; then
+            sed -i \
+                -e "s|__USER_HOME__|$HOME|g" \
+                -e "s|/home/codywan|$HOME|g" \
+                "$f"
+        fi
     done
+    return 0
 }
 
 build_make() {

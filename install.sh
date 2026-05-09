@@ -42,8 +42,8 @@ section "Installing pacman packages"
 PKGS="
 base-devel git make meson ninja pkgconf
 libx11 libxinerama libxft libxrender libxres libxext libxcomposite
-libxdamage libxfixes libxrandr libxxf86vm libxcb xcb-util-renderutil
-xcb-util-image xorgproto
+libxdamage libxfixes libxrandr libxxf86vm libxcb xcb-util
+xcb-util-renderutil xcb-util-image xorgproto libdrm
 freetype2 fontconfig pixman mesa pcre2 libev libconfig dbus uthash
 spdlog fmt
 xorg-server xorg-xinit xorg-xrandr xorg-xset xorg-xsetroot

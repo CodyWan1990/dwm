@@ -823,7 +823,14 @@ build_make() {
     pkg="$1"
     info "Building $pkg"
     substitute_paths "$SRCDIR/$pkg"
-    if (cd "$SRCDIR/$pkg" && make clean && make && sudo make install) >>"$LOG" 2>&1; then
+    # dfm is a shell-script-only project; its Makefile has only `install`
+    # and `uninstall` targets (no `all`, no `clean`).  Skip the compile dance.
+    if [ "$pkg" = "dfm" ]; then
+        cmd='sudo make install'
+    else
+        cmd='make clean && make && sudo make install'
+    fi
+    if (cd "$SRCDIR/$pkg" && eval "$cmd") >>"$LOG" 2>&1; then
         ok "$pkg installed"
     else
         err "$pkg build failed — log tail:"

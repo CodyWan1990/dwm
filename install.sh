@@ -40,7 +40,7 @@ ok "Build log: $LOG"
 # ───────────── 1. pacman dependencies ─────────────
 section "Installing pacman packages"
 PKGS="
-base-devel git make meson ninja pkgconf
+base-devel git make meson ninja pkgconf cmake
 libx11 libxinerama libxft libxrender libxres libxext libxcomposite
 libxdamage libxfixes libxrandr libxxf86vm libxcb xcb-util
 xcb-util-renderutil xcb-util-image xorgproto libdrm

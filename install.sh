@@ -830,13 +830,12 @@ build_make() {
 build_meson() {
     pkg="$1"
     info "Building $pkg (meson)"
+    # Nuke the build dir every run.  --reconfigure has bitten us when a
+    # previous attempt left a partial build/, and the rebuild cost is small.
     if (
         cd "$SRCDIR/$pkg"
-        if [ -d build ]; then
-            meson setup --buildtype=release --reconfigure build
-        else
-            meson setup --buildtype=release build
-        fi
+        rm -rf build
+        meson setup --buildtype=release build
         ninja -C build
         sudo ninja -C build install
     ) >>"$LOG" 2>&1; then

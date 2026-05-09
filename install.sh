@@ -42,15 +42,15 @@ section "Installing pacman packages"
 PKGS="
 base-devel git make meson ninja pkgconf
 libx11 libxinerama libxft libxrender libxres libxext libxcomposite
-libxdamage libxfixes libxrandr libxxf86vm libxcb libxcb-render
-libxcb-shape libxcb-renderutil xorgproto
+libxdamage libxfixes libxrandr libxxf86vm libxcb xcb-util-renderutil
+xcb-util-image xorgproto
 freetype2 fontconfig pixman mesa pcre2 libev libconfig dbus uthash
 spdlog fmt
 xorg-server xorg-xinit xorg-xrandr xorg-xset xorg-xsetroot
 xorg-xprop xorg-xkill
 xdotool xclip xdg-utils
-sxhkd polkit-gnome nitrogen dunst
-curl jq pacman-contrib lm_sensors pulseaudio-utils wireplumber
+sxhkd polkit-gnome feh dunst
+curl jq pacman-contrib lm_sensors libpulse wireplumber
 j4-dmenu-desktop perl
 fish
 "
@@ -577,7 +577,8 @@ xset -dpms                              # No DPMS power-down
 sxhkd &
 /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 &
 picom &
-nitrogen --restore &
+# Wallpaper: prefer feh (default), fall back to nitrogen if you switch.
+[ -f "$HOME/.config/wallpaper" ] && feh --bg-fill "$HOME/.config/wallpaper" 2>/dev/null &
 dwmblocks &
 clipmenud &
 

@@ -792,6 +792,15 @@ esac
 # ───────────── 6. build & install ─────────────
 section "Building suckless tools"
 
+# Keep sudo authenticated across all the builds — long meson/ninja runs can
+# outlast sudo's default timeout, and stdout/stderr being redirected to the
+# log means a re-prompt would silently hang.
+info "Refreshing sudo (you may be prompted)"
+sudo -v
+( while true; do sudo -nv 2>/dev/null; sleep 60; done ) &
+SUDO_KEEPALIVE_PID=$!
+trap 'kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true' EXIT INT TERM
+
 # Substitute the __USER_HOME__ placeholder (and any stale /home/codywan literals
 # from upstream) with the current user's $HOME in every config*.h file in the
 # given directory. Idempotent: runs every build, no-ops once placeholders are

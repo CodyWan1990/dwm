@@ -1,0 +1,41 @@
+# Build artifacts
+*.o
+*.a
+*.so
+*.so.*
+
+# Suckless built binaries
+dwm-6.8/dwm
+st-0.9.3/st
+dmenu-5.4/dmenu
+dmenu-5.4/dmenu_path
+dmenu-5.4/stest
+dwmblocks/dwmblocks
+dwmblocks/sigdwmblocks/sigdwmblocks
+dwmblocks/xgetrootname/xgetrootname
+clipmenu/build/
+clipmenu/clipmenu
+clipmenu/clipmenud
+clipmenu/clipdel
+clipmenu/clipctl
+clipmenu/clipserve
+
+# picom (meson build dir)
+FT-Labs-picom/build/
+
+# Patch / backup leftovers
+*.bak
+*.orig
+*.rej
+
+# Tarballs (originals already on disk; not part of repo)
+*.tar.gz
+*.tar.xz
+
+# Editor artifacts
+*.swp
+*.swo
+*~
+
+# Install log
+suckless-install.log

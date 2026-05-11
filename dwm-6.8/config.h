@@ -15,7 +15,7 @@ static const int topbar             = 1;        /* 0 means bottom bar */
 static const char *fonts[]          = { "Monofur Nerd Font Propo:size=14", "monospace:size=12" };
 static const char dmenufont[]       = "Monofur Nerd Font Propo:size=14";
 /* Colorschemes ported from the user's Niri themes
- * see ~/scripts/theming/colorschemes/
+ * see ~/.config/suckless/scripts/colorschemes/
  * Per scheme, four variants:
  *   SchemeNorm  = { FG,     BG,        COMMENT  }   normal text + inactive border
  *   SchemeSel   = { BLUE,   SELECTION, BLUE     }   selected/focused
@@ -92,7 +92,7 @@ static const char *colors[][SchemeN][3] = {
 };
 
 /* Maps each colors[] index to the basename of its file in
- * ~/scripts/theming/colorschemes/<name>.sh — used by applyscheme() to keep
+ * ~/.config/suckless/scripts/colorschemes/<name>.sh — used by applyscheme() to keep
  * dwmblocks in sync. KEEP IN ORDER WITH colors[]. */
 static const char *colorscheme_files[] = {
 	"monokai",          /* 0 - Monokai Pro */
@@ -159,15 +159,15 @@ static const Layout layouts[] = {
 /* commands */
 static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
 /* Generic "run any binary in $PATH" — themed dmenu_run. Bound to Mod+Alt+Space. */
-static const char *dmenucmd[]    = { "/home/codywan/scripts/dmenu/dmenu-themed.sh", "-m", dmenumon, NULL };
+static const char *dmenucmd[]    = { "/home/codywan/.config/suckless/scripts/dmenu/dmenu-themed.sh", "-m", dmenumon, NULL };
 /* .desktop-aware launcher (apps + flatpaks only) — themed. Bound to Mod+Space. */
-static const char *appscmd[]     = { "/home/codywan/scripts/dmenu/dmenu-apps.sh", NULL };
+static const char *appscmd[]     = { "/home/codywan/.config/suckless/scripts/dmenu/dmenu-apps.sh", NULL };
 /* Clipboard history (clipmenud must be running). Bound to Mod+V. */
-static const char *clipmenucmd[] = { "/home/codywan/scripts/dmenu/clipmenu-themed.sh", NULL };
+static const char *clipmenucmd[] = { "/home/codywan/.config/suckless/scripts/dmenu/clipmenu-themed.sh", NULL };
 /* DFM file manager — themed via PATH shim. Bound to Mod+Alt+F. */
-static const char *dfmcmd[]      = { "/home/codywan/scripts/dmenu/dfm-themed.sh", NULL };
+static const char *dfmcmd[]      = { "/home/codywan/.config/suckless/scripts/dmenu/dfm-themed.sh", NULL };
 /* Power menu (Logout / Reboot / Shutdown) — themed dmenu. Bound to Ctrl+Alt+Delete. */
-static const char *powermenucmd[] = { "/home/codywan/scripts/dmenu/powermenu.sh", NULL };
+static const char *powermenucmd[] = { "/home/codywan/.config/suckless/scripts/dmenu/powermenu.sh", NULL };
 static const char *termcmd[]  = { "st", NULL };
 
 #include "movestack.c"

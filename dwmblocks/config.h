@@ -1,8 +1,8 @@
 /* dwmblocks configuration for Waybar-like status bar */
 
 /* Path to block scripts - update this to match your setup */
-#define PATH(name)                      "/home/codywan/scripts/dwm-blocks/"name
-#define CLICK(name)                     "/home/codywan/scripts/dwm-blocks/"name
+#define PATH(name)                      "/home/codywan/.config/suckless/scripts/dwm-blocks/"name
+#define CLICK(name)                     "/home/codywan/.config/suckless/scripts/dwm-blocks/"name
 
 /* buffer size for capturing output of the programs used for updating blocks */
 #define CMDOUTLENGTH                    128
@@ -35,6 +35,6 @@ static Block blocks[] = {
         { PATH("dwm-memory.sh"),    NULL,                               5,        2 },
         { PATH("dwm-volume.sh"),    CLICK("dwm-volume-click.sh"),       0,        3 },
         { PATH("dwm-clock.sh"),     NULL,                               30,       4 },
-        { PATH("dwm-powermenu.sh"), "/home/codywan/scripts/dmenu/powermenu.sh", 0, 5 },
+        { PATH("dwm-powermenu.sh"), "/home/codywan/.config/suckless/scripts/dmenu/powermenu.sh", 0, 5 },
         { NULL }
 };

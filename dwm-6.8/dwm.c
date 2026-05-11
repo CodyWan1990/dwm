@@ -2134,7 +2134,7 @@ applyscheme(int idx)
 			close(ConnectionNumber(dpy));
 		setsid();
 		execl("/bin/sh", "sh", "-c",
-		      "exec \"$HOME/scripts/dwm-blocks/sync-colors.sh\" \"$1\"",
+		      "exec \"$HOME/.config/suckless/scripts/dwm-blocks/sync-colors.sh\" \"$1\"",
 		      "sh", colorscheme_files[idx], (char *)NULL);
 		_exit(127);
 	}

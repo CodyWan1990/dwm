@@ -11,7 +11,7 @@ all: dwmblocks sigdwmblocks/sigdwmblocks xgetrootname/xgetrootname
 dwmblocks: dwmblocks.c config.h block.h
 	${CC} -o $@ -Wno-missing-field-initializers -Wno-unused-parameter ${CFLAGS} ${X11CFLAGS} $< ${X11LIBS}
 
-E0BLOCKS = $(HOME)/scripts/dwm-blocks
+E0BLOCKS = $(HOME)/.config/suckless/scripts/dwm-blocks
 # two level escaping of `\', one for sed and one for C
 E1BLOCKS = $(subst \,\\\\,${E0BLOCKS})
 # escaping special character `&' and delimiter `=' for sed

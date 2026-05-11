@@ -3,7 +3,7 @@
 
 static int topbar = 1;                      /* -b  option; if 0, dmenu appears at bottom     */
 static int centered = 1;                    /* -c option; centers dmenu on screen */
-static int min_width = 500;                 /* minimum width when centered */
+static int min_width = 900;                 /* minimum width when centered */
 static const float menu_height_ratio = 4.0f;  /* ratio used in the original geometry calc */
 static int fuzzy  = 1;                      /* -F  option; if 0, dmenu doesn't use fuzzy matching */
 /* -fn option overrides fonts[0]; default X11 font or font set */
@@ -19,10 +19,12 @@ static const char *colors[SchemeLast][2] = {
 	[SchemeSelHighlight] = { "#ffc978", "#005577" },
 	[SchemeNormHighlight] = { "#ffc978", "#222222" },
 	[SchemeOut] = { "#000000", "#00ffff" },
-	[SchemeHp]  = { "#bbbbbb", "#333333" }
+	[SchemeHp]  = { "#bbbbbb", "#333333" },
+	[SchemeMid] = { "#eeeeee", "#3a4458" },
 };
-/* -l option; if nonzero, dmenu uses vertical list with given number of lines */
+/* -l and -g options; if both > 0, dmenu uses a grid; -l alone is vertical list */
 static unsigned int lines      = 0;
+static unsigned int columns    = 0;
 /* -h option; minimum height of a menu line */
 static unsigned int lineheight = 0;
 static unsigned int min_lineheight = 8;

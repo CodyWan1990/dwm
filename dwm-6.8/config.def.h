@@ -159,15 +159,15 @@ static const Layout layouts[] = {
 /* commands */
 static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
 /* Generic "run any binary in $PATH" — themed dmenu_run. Bound to Mod+Alt+Space. */
-static const char *dmenucmd[]    = { "__USER_HOME__/.config/suckless/scripts/dmenu/dmenu-themed.sh", "-m", dmenumon, NULL };
+static const char *dmenucmd[]    = { "/home/codywan/.config/suckless/scripts/dmenu/dmenu-themed.sh", "-m", dmenumon, NULL };
 /* .desktop-aware launcher (apps + flatpaks only) — themed. Bound to Mod+Space. */
-static const char *appscmd[]     = { "__USER_HOME__/.config/suckless/scripts/dmenu/dmenu-apps.sh", NULL };
+static const char *appscmd[]     = { "/home/codywan/.config/suckless/scripts/dmenu/dmenu-apps.sh", NULL };
 /* Clipboard history (clipmenud must be running). Bound to Mod+V. */
-static const char *clipmenucmd[] = { "__USER_HOME__/.config/suckless/scripts/dmenu/clipmenu-themed.sh", NULL };
+static const char *clipmenucmd[] = { "/home/codywan/.config/suckless/scripts/dmenu/clipmenu-themed.sh", NULL };
 /* DFM file manager — themed via PATH shim. Bound to Mod+Alt+F. */
-static const char *dfmcmd[]      = { "__USER_HOME__/.config/suckless/scripts/dmenu/dfm-themed.sh", NULL };
+static const char *dfmcmd[]      = { "/home/codywan/.config/suckless/scripts/dmenu/dfm-themed.sh", NULL };
 /* Power menu (Logout / Reboot / Shutdown) — themed dmenu. Bound to Ctrl+Alt+Delete. */
-static const char *powermenucmd[] = { "__USER_HOME__/.config/suckless/scripts/dmenu/powermenu.sh", NULL };
+static const char *powermenucmd[] = { "/home/codywan/.config/suckless/scripts/dmenu/powermenu.sh", NULL };
 static const char *termcmd[]  = { "st", NULL };
 
 #include "movestack.c"

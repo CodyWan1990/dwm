@@ -192,6 +192,8 @@ static void xhints(void);
 static int xloadcolor(int, const char *, Color *);
 static int xloadfont(Font *, FcPattern *);
 static void xloadfonts(const char *, double);
+static int xloadsparefont(FcPattern *, int);
+static void xloadsparefonts(void);
 static void xunloadfont(Font *);
 static void xunloadfonts(void);
 static void xsetenv(void);
@@ -348,6 +350,7 @@ zoomabs(const Arg *arg)
 {
 	xunloadfonts();
 	xloadfonts(usedfont, arg->f);
+	xloadsparefonts();
 	cresize(0, 0);
 	redraw();
 	xhints();
@@ -586,7 +589,7 @@ bpress(XEvent *e)
 			return;
 		}
 		if (!tisaltscreen()) {
-			a.i = 1;
+			a.i = (e->xbutton.state & ShiftMask) ? 15 : 5;
 			if (btn == Button4) {
 				kscrollup(&a);
 			} else {
@@ -1331,6 +1334,97 @@ xloadfonts(const char *fontstr, double fontsize)
 	FcPatternDestroy(pattern);
 }
 
+int
+xloadsparefont(FcPattern *pattern, int flags)
+{
+	FcPattern *match;
+	FcResult result;
+
+	match = FcFontMatch(NULL, pattern, &result);
+	if (!match) {
+		return 1;
+	}
+
+	if (!(frc[frclen].font = XftFontOpenPattern(xw.dpy, match))) {
+		FcPatternDestroy(match);
+		return 1;
+	}
+
+	frc[frclen].flags = flags;
+	frc[frclen].unicodep = 0;
+	frclen++;
+
+	return 0;
+}
+
+void
+xloadsparefonts(void)
+{
+	FcPattern *pattern;
+	double sizeshift, fontval;
+	int fc;
+	char **fp;
+
+	if (frclen != 0)
+		die("can't embed spare fonts. cache isn't empty");
+
+	fc = sizeof(font2) / sizeof(*font2);
+	if (fc == 0)
+		return;
+
+	if (frccap < 4 * fc) {
+		frccap += 4 * fc - frccap;
+		frc = xrealloc(frc, frccap * sizeof(Fontcache));
+	}
+
+	for (fp = font2; fp - font2 < fc; ++fp) {
+		if (**fp == '-')
+			pattern = XftXlfdParse(*fp, False, False);
+		else
+			pattern = FcNameParse((FcChar8 *)*fp);
+
+		if (!pattern)
+			die("can't open spare font %s\n", *fp);
+
+		if (defaultfontsize > 0) {
+			sizeshift = usedfontsize - defaultfontsize;
+			if (sizeshift != 0 &&
+					FcPatternGetDouble(pattern, FC_PIXEL_SIZE, 0, &fontval) ==
+					FcResultMatch) {
+				fontval += sizeshift;
+				FcPatternDel(pattern, FC_PIXEL_SIZE);
+				FcPatternDel(pattern, FC_SIZE);
+				FcPatternAddDouble(pattern, FC_PIXEL_SIZE, fontval);
+			}
+		}
+
+		FcPatternAddBool(pattern, FC_SCALABLE, 1);
+
+		FcConfigSubstitute(NULL, pattern, FcMatchPattern);
+		XftDefaultSubstitute(xw.dpy, xw.scr, pattern);
+
+		if (xloadsparefont(pattern, FRC_NORMAL))
+			die("can't open spare font %s\n", *fp);
+
+		FcPatternDel(pattern, FC_SLANT);
+		FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ITALIC);
+		if (xloadsparefont(pattern, FRC_ITALIC))
+			die("can't open spare font %s\n", *fp);
+
+		FcPatternDel(pattern, FC_WEIGHT);
+		FcPatternAddInteger(pattern, FC_WEIGHT, FC_WEIGHT_BOLD);
+		if (xloadsparefont(pattern, FRC_ITALICBOLD))
+			die("can't open spare font %s\n", *fp);
+
+		FcPatternDel(pattern, FC_SLANT);
+		FcPatternAddInteger(pattern, FC_SLANT, FC_SLANT_ROMAN);
+		if (xloadsparefont(pattern, FRC_BOLD))
+			die("can't open spare font %s\n", *fp);
+
+		FcPatternDestroy(pattern);
+	}
+}
+
 void
 xunloadfont(Font *f)
 {
@@ -1445,6 +1539,9 @@ xinit(int cols, int rows)
 	usedfont = (opt_font == NULL)? font : opt_font;
 	xloadfonts(usedfont, 0);
 
+	/* spare fonts */
+	xloadsparefonts();
+
 	/* colors */
 	xw.cmap = XCreateColormap(xw.dpy, parent, xw.vis, None);
 	xloadcols();
@@ -1487,6 +1584,7 @@ xinit(int cols, int rows)
 
 	/* Xft rendering context */
 	xw.draw = XftDrawCreate(xw.dpy, xw.buf, xw.vis, xw.cmap);
+	boxdraw_xinit(xw.dpy, xw.cmap, xw.draw, xw.vis);
 
 	/* input methods */
 	if (!ximopen(xw.dpy)) {
@@ -1615,7 +1713,16 @@ xmakeglyphfontspecs(XftGlyphFontSpec *specs, const Glyph *glyphs, int len, int x
 			cluster_yp = yp;
 		}
 
-		if (shaped.glyphs[code_idx].codepoint != 0) {
+		if (glyphs[idx].mode & ATTR_BOXDRAW) {
+			/* Box-drawing chars bypass harfbuzz: the "glyph" field
+			 * encodes the shape data for boxdraw.c to render. */
+			specs[numspecs].font = font->match;
+			specs[numspecs].glyph = boxdrawindex(&glyphs[idx]);
+			specs[numspecs].x = cluster_xp;
+			specs[numspecs].y = cluster_yp;
+			cluster_xp += runewidth;
+			numspecs++;
+		} else if (shaped.glyphs[code_idx].codepoint != 0) {
 			/* If symbol is found, put it into the specs. */
 			specs[numspecs].font = font->match;
 			specs[numspecs].glyph = shaped.glyphs[code_idx].codepoint;
@@ -1789,10 +1896,6 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 		bg = &dc.col[base.bg];
 	}
 
-	/* Change basic system colors [0-7] to bright system colors [8-15] */
-	if ((base.mode & ATTR_BOLD_FAINT) == ATTR_BOLD && BETWEEN(base.fg, 0, 7))
-		fg = &dc.col[base.fg + 8];
-
 	if (IS_SET(MODE_REVERSE)) {
 		if (fg == &dc.col[defaultfg]) {
 			fg = &dc.col[defaultbg];
@@ -1865,8 +1968,12 @@ xdrawglyphfontspecs(const XftGlyphFontSpec *specs, Glyph base, int len, int x, i
 	r.width = width;
 	XftDrawSetClipRectangles(xw.draw, winx, winy, &r, 1);
 
-	/* Render the glyphs. */
-	XftDrawGlyphFontSpec(xw.draw, fg, specs, len);
+	if (base.mode & ATTR_BOXDRAW) {
+		drawboxes(winx, winy, width / len, win.ch, fg, bg, specs, len);
+	} else {
+		/* Render the glyphs. */
+		XftDrawGlyphFontSpec(xw.draw, fg, specs, len);
+	}
 
 	/* Render underline and strikethrough. */
 	if (base.mode & ATTR_UNDERLINE) {
@@ -2271,7 +2378,7 @@ xdrawcursor(int cx, int cy, Glyph g, int ox, int oy, Glyph og, Line line, int le
 	/*
 	 * Select the right color for the right mode.
 	 */
-	g.mode &= ATTR_BOLD|ATTR_ITALIC|ATTR_UNDERLINE|ATTR_STRUCK|ATTR_WIDE;
+	g.mode &= ATTR_BOLD|ATTR_ITALIC|ATTR_UNDERLINE|ATTR_STRUCK|ATTR_WIDE|ATTR_BOXDRAW;
 
 	if (IS_SET(MODE_REVERSE)) {
 		g.mode |= ATTR_REVERSE;
@@ -2349,6 +2456,32 @@ xdrawimages(Glyph base, Line line, int x1, int y1, int x2) {
 	int y_pix = win.vborderpx + y1 * win.ch;
 	uint32_t image_id_24bits = base.fg & 0xFFFFFF;
 	uint32_t placement_id = tgetimgplacementid(&base);
+
+	/* Fill the cell-span background BEFORE compositing the image.
+	 * Without this, transparent pixels in the image get PictOpOver'd onto
+	 * stale buffer content (old text, prior frame, etc.) — visible as
+	 * ghosted text through transparent image regions. The standard glyph
+	 * path does this at xdrawglyphfontspecs; the image path skipped it. */
+	{
+		Color *bg, truebg;
+		XRenderColor colbg;
+		int x_start_pix = win.hborderpx + x1 * win.cw;
+		int width_pix = (x2 - x1) * win.cw;
+		if (IS_TRUECOL(base.bg)) {
+			colbg.alpha = 0xffff;
+			colbg.red   = TRUERED(base.bg);
+			colbg.green = TRUEGREEN(base.bg);
+			colbg.blue  = TRUEBLUE(base.bg);
+			XftColorAllocValue(xw.dpy, xw.vis, xw.cmap, &colbg, &truebg);
+			bg = &truebg;
+		} else {
+			bg = &dc.col[base.bg];
+		}
+		XftDrawRect(xw.draw, bg, x_start_pix, y_pix, width_pix, win.ch);
+		if (IS_TRUECOL(base.bg))
+			XftColorFree(xw.dpy, xw.vis, xw.cmap, &truebg);
+	}
+
 	// Columns and rows are 1-based, 0 means unspecified.
 	int last_col = 0;
 	int last_row = 0;

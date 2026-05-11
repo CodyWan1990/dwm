@@ -54,6 +54,12 @@ void gr_dump_state();
 /// Unloads images to reduce RAM usage.
 void gr_unload_images_to_reduce_ram();
 
+/// Invalidates all classic (non-virtual) image placements visible in the
+/// terminal. Used after a reflow that may have broken multi-cell image
+/// layouts: restores any text underneath, removes the placements, but keeps
+/// the underlying images cached for reuse.
+void gr_invalidate_classic_placements();
+
 /// Executes `callback` for each image cell. The callback should return 1 if it
 /// changed the glyph. This function is implemented in `st.c`.
 void gr_for_each_image_cell(int (*callback)(void *data, Glyph *gp),

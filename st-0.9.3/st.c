@@ -22,6 +22,8 @@
 #include "win.h"
 #include "graphics.h"
 
+extern char *argv0;
+
 #if   defined(__linux)
  #include <pty.h>
 #elif defined(__OpenBSD__) || defined(__NetBSD__) || defined(__APPLE__)
@@ -1215,6 +1217,7 @@ ttynew(const char *line, char *cmd, const char *out, char **args)
 		if (pledge("stdio rpath tty proc", NULL) == -1)
 			die("pledge\n");
 #endif
+		fcntl(m, F_SETFD, FD_CLOEXEC);
 		close(s);
 		cmdfd = m;
 		signal(SIGCHLD, sigchld);
@@ -1732,6 +1735,8 @@ tsetchar(Rune u, const Glyph *attr, int x, int y)
 	if (u == IMAGE_PLACEHOLDER_CHAR || u == IMAGE_PLACEHOLDER_CHAR_OLD) {
 		term.line[y][x].u = 0;
 		term.line[y][x].mode |= ATTR_IMAGE;
+	} else if (isboxdraw(u)) {
+		term.line[y][x].mode |= ATTR_BOXDRAW;
 	}
 }
 
@@ -1833,31 +1838,64 @@ void tcreateimgplaceholder(uint32_t image_id, uint32_t placement_id, int cols,
 	}
 }
 
+/* Walk every image cell in scrollback AND live screen. Dirty-marking uses
+ * viewport coordinates so it works when sb.view_offset > 0. */
 void gr_for_each_image_cell(int (*callback)(void *data, Glyph *gp),
 			    void *data) {
+	for (int i = 0; i < sb.len; ++i) {
+		Line line = sb_get(i);
+		if (!line)
+			continue;
+		int vrow = i - (sb.len - sb.view_offset);
+		for (int col = 0; col < term.col; ++col) {
+			Glyph *gp = &line[col];
+			if (gp->mode & ATTR_IMAGE) {
+				if (callback(data, gp) &&
+				    vrow >= 0 && vrow < term.row)
+					term.dirty[vrow] = 1;
+			}
+		}
+	}
 	for (int row = 0; row < term.row; ++row) {
+		int vrow = row + sb.view_offset;
 		for (int col = 0; col < term.col; ++col) {
 			Glyph *gp = &term.line[row][col];
 			if (gp->mode & ATTR_IMAGE) {
-				if (callback(data, gp))
-					term.dirty[row] = 1;
+				if (callback(data, gp) &&
+				    vrow >= 0 && vrow < term.row)
+					term.dirty[vrow] = 1;
 			}
 		}
 	}
 }
 
 void gr_schedule_image_redraw_by_id(uint32_t image_id) {
+	for (int i = 0; i < sb.len; ++i) {
+		int vrow = i - (sb.len - sb.view_offset);
+		if (vrow < 0 || vrow >= term.row || term.dirty[vrow])
+			continue;
+		Line line = sb_get(i);
+		if (!line)
+			continue;
+		for (int col = 0; col < term.col; ++col) {
+			Glyph *gp = &line[col];
+			if ((gp->mode & ATTR_IMAGE) &&
+			    tgetimgid(gp) == image_id) {
+				term.dirty[vrow] = 1;
+				break;
+			}
+		}
+	}
 	for (int row = 0; row < term.row; ++row) {
-		if (term.dirty[row])
+		int vrow = row + sb.view_offset;
+		if (vrow < 0 || vrow >= term.row || term.dirty[vrow])
 			continue;
 		for (int col = 0; col < term.col; ++col) {
 			Glyph *gp = &term.line[row][col];
-			if (gp->mode & ATTR_IMAGE) {
-				uint32_t cell_image_id = tgetimgid(gp);
-				if (cell_image_id == image_id) {
-					term.dirty[row] = 1;
-					break;
-				}
+			if ((gp->mode & ATTR_IMAGE) &&
+			    tgetimgid(gp) == image_id) {
+				term.dirty[vrow] = 1;
+				break;
 			}
 		}
 	}
@@ -3499,6 +3537,13 @@ tresize(int col, int row)
 		pop_width = needs_reflow ? col : MIN(col, old_col);
 		sb_pop_screen(loaded, pop_width);
 	}
+	/* Reflow can split multi-row kitty graphics placements across new row
+	 * boundaries, leaving them scrambled. Drop classic placements so the
+	 * user sees clean cells rather than corrupted image fragments. Virtual
+	 * (Unicode-placeholder) placements are per-cell self-contained and
+	 * survive reflow on their own. */
+	if (needs_reflow)
+		gr_invalidate_classic_placements();
 	if (is_alt) {
 		tmp = term.line;
 		term.line = term.alt;
@@ -3583,6 +3628,95 @@ redraw(void)
 {
 	tfulldirt();
 	draw();
+}
+
+static int
+chdir_by_pid(pid_t cpid)
+{
+	char buf[32];
+	snprintf(buf, sizeof buf, "/proc/%ld/cwd", (long)cpid);
+	return chdir(buf);
+}
+
+void
+newterm(const Arg *a)
+{
+	switch (fork()) {
+	case -1:
+		die("fork failed: %s\n", strerror(errno));
+		break;
+	case 0:
+		switch (fork()) {
+		case -1:
+			fprintf(stderr, "fork failed: %s\n", strerror(errno));
+			_exit(1);
+			break;
+		case 0:
+			chdir_by_pid(pid);
+			execl("/proc/self/exe", argv0, (char *)NULL);
+			_exit(1);
+			break;
+		default:
+			_exit(0);
+		}
+	default:
+		wait(NULL);
+	}
+}
+
+/* select and copy the previous url on screen (do nothing if there's no url).
+ * known bug: doesn't handle urls that span multiple lines (wontfix)
+ * known bug: only finds first url on line (mightfix)
+ */
+void
+copyurl(const Arg *arg)
+{
+	static char URLCHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		"abcdefghijklmnopqrstuvwxyz"
+		"0123456789-._~:/?#@!$&'*+,;=%";
+	int i, row, startrow;
+	char *linestr = calloc(sizeof(char), term.col + 1);
+	char *c, *match = NULL;
+
+	row = (sel.ob.x >= 0 && sel.nb.y > 0) ? sel.nb.y - 1 : term.bot;
+	LIMIT(row, term.top, term.bot);
+	startrow = row;
+
+	do {
+		for (i = 0; i < term.col; ++i) {
+			if (term.line[row][i].u > 127)
+				continue;
+			linestr[i] = term.line[row][i].u;
+		}
+		linestr[term.col] = '\0';
+		if ((match = strstr(linestr, "http://"))
+				|| (match = strstr(linestr, "https://")))
+			break;
+		if (--row < term.top)
+			row = term.bot;
+	} while (row != startrow);
+
+	if (match) {
+		selclear();
+		sel.ob.x = strlen(linestr) - strlen(match);
+
+		for (c = match; *c != '\0'; ++c)
+			if (!strchr(URLCHARS, *c)) {
+				*c = '\0';
+				break;
+			}
+
+		sel.mode = 1;
+		sel.type = SEL_REGULAR;
+		sel.oe.x = sel.ob.x + strlen(match) - 1;
+		sel.ob.y = sel.oe.y = row;
+		selnormalize();
+		tsetdirt(sel.nb.y, sel.ne.y);
+		xsetsel(getsel());
+		xclipcopy();
+	}
+
+	free(linestr);
 }
 
 Glyph

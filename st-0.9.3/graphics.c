@@ -2725,6 +2725,13 @@ static int gr_getrectbottom(ImageRect *rect) {
 
 /// Prepare for image drawing. `cw` and `ch` are dimensions of the cell.
 void gr_start_drawing(Drawable buf, int cw, int ch) {
+	/* Drop any rects left over from a prior batch that never reached
+	 * gr_finish_drawing (early-return paths in xdraw). They were buffered
+	 * against the previous drawable and would render incorrectly now. */
+	for (size_t i = 0; i < MAX_IMAGE_RECTS; ++i) {
+		if (image_rects[i].image_id)
+			gr_freerect(&image_rects[i]);
+	}
 	current_cw = cw;
 	current_ch = ch;
 	debug_loaded_files_counter = 0;
@@ -3158,6 +3165,7 @@ static void gr_display_nonvirtual_placement(ImagePlacement *placement) {
 	graphics_command_result.placeholder.rows = placement->rows;
 	graphics_command_result.placeholder.do_not_move_cursor =
 		placement->do_not_move_cursor;
+	free(placement->text_underneath);
 	placement->text_underneath =
 		calloc(placement->rows * placement->cols, sizeof(Glyph));
 	graphics_command_result.placeholder.text_underneath =
@@ -3902,6 +3910,23 @@ static void gr_handle_delete_command(GraphicsCommand *cmd) {
 	if (d == 'i' && !del_data.placement_id && delete_image_if_no_ref)
 		gr_delete_image(gr_find_image(cmd->image_id));
 
+	kv_destroy(del_data.placements_to_delete);
+}
+
+/// Invalidate all classic placements after a terminal reflow that may have
+/// broken multi-cell image layouts. Restores text_underneath where available
+/// and removes the placements; underlying images stay cached for reuse.
+void gr_invalidate_classic_placements() {
+	DeletionData del_data = {0};
+	kv_init(del_data.placements_to_delete);
+	gr_for_each_image_cell(gr_deletion_callback, &del_data);
+	for (int i = 0; i < kv_size(del_data.placements_to_delete); ++i) {
+		ImagePlacement *placement =
+			kv_A(del_data.placements_to_delete, i);
+		free(placement->text_underneath);
+		placement->text_underneath = NULL;
+		gr_delete_placement(placement);
+	}
 	kv_destroy(del_data.placements_to_delete);
 }
 

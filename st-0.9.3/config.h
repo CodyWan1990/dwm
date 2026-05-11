@@ -6,6 +6,11 @@
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
 static char *font = "Monofur Nerd Font Mono:style=bold:pixelsize=16, Liberation Mono:pixelsize=12:antialias=true:autohint=true";
+/* Spare fonts: searched in order when the primary font lacks a glyph. */
+static char *font2[] = {
+	"Symbols Nerd Font Mono:pixelsize=16",
+	"Noto Color Emoji:pixelsize=14",
+};
 static int borderpx = 20;
 
 /* How to align the content in the window when the size of the terminal
@@ -84,6 +89,16 @@ static unsigned int blinktimeout = 800;
  * thickness of underline and bar cursors
  */
 static unsigned int cursorthickness = 2;
+
+/*
+ * boxdraw: render U2500..U259F box-drawing chars and U25XX block elements
+ * natively for pixel-perfect alignment instead of via the font.
+ *   boxdraw_bold:   bold affects line thickness when set
+ *   boxdraw_braille: render U2800 braille chars as pixel dots
+ */
+const int boxdraw = 1;
+const int boxdraw_bold = 0;
+const int boxdraw_braille = 1;
 
 /*
  * bell volume. It must be a value between -100 and 100. Use 0 for disabling
@@ -245,6 +260,10 @@ static Shortcut shortcuts[] = {
 	{ TERMMOD,              XK_Prior,       zoom,           {.f = +1} },
 	{ TERMMOD,              XK_Next,        zoom,           {.f = -1} },
 	{ TERMMOD,              XK_Home,        zoomreset,      {.f =  0} },
+	{ ControlMask,          XK_plus,        zoom,           {.f = +1} },
+	{ ControlMask,          XK_equal,       zoom,           {.f = +1} },
+	{ ControlMask,          XK_minus,       zoom,           {.f = -1} },
+	{ ControlMask,          XK_0,           zoomreset,      {.f =  0} },
 	{ TERMMOD,              XK_C,           clipcopy,       {.i =  0} },
 	{ TERMMOD,              XK_V,           clippaste,      {.i =  0} },
 	{ TERMMOD,              XK_Y,           selpaste,       {.i =  0} },
@@ -254,6 +273,8 @@ static Shortcut shortcuts[] = {
 	{ TERMMOD,              XK_F6,          dumpgrstate,    {.i =  0} },
 	{ TERMMOD,              XK_F7,          unloadimages,   {.i =  0} },
 	{ TERMMOD,              XK_F8,          toggleimages,   {.i =  0} },
+	{ TERMMOD,              XK_L,           copyurl,        {.i =  0} },
+	{ TERMMOD,              XK_Return,      newterm,        {.i =  0} },
 };
 
 /*

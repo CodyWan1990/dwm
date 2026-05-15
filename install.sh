@@ -75,7 +75,7 @@ section "Installing shell hooks (fish + bash)"
 cat > "$HOME/.config/fish/conf.d/dwm-st-colors.fish" <<'_END_'
 # Auto-apply the dwm colorscheme palette to st (and any OSC-compatible terminal)
 # on every interactive shell startup. Populated by ~/.config/suckless/scripts/dwm-blocks/sync-colors.sh.
-if status is-interactive
+if status is-interactive; and string match -q 'st-*' -- $TERM
     set -l osc "$HOME/.cache/dwm-colorscheme/st-osc.txt"
     if test -r "$osc"
         cat "$osc"
@@ -91,7 +91,7 @@ if ! grep -q "dwm colorscheme: auto-apply OSC palette" "$BASHRC" 2>/dev/null; th
     cat >> "$BASHRC" <<'_END_'
 
 # --- dwm colorscheme: auto-apply OSC palette on interactive bash startup ---
-if [[ $- == *i* ]] && [[ -r "$HOME/.cache/dwm-colorscheme/st-osc.txt" ]]; then
+if [[ $- == *i* ]] && [[ $TERM == st-* ]] && [[ -r "$HOME/.cache/dwm-colorscheme/st-osc.txt" ]]; then
     cat "$HOME/.cache/dwm-colorscheme/st-osc.txt"
 fi
 _END_

@@ -68,14 +68,16 @@ PKGS_DEBIAN="
 build-essential git make meson ninja-build pkg-config cmake
 libx11-dev libxinerama-dev libxft-dev libxrender-dev libxres-dev libxext-dev
 libxcomposite-dev libxdamage-dev libxfixes-dev libxrandr-dev libxxf86vm-dev
-libxcb1-dev libxcb-res0-dev libxcb-util-dev libxcb-render-util0-dev libxcb-image0-dev
+libxcb1-dev libx11-xcb-dev libxcb-res0-dev libxcb-util-dev libxcb-render-util0-dev libxcb-image0-dev
+libxcb-composite0-dev libxcb-damage0-dev libxcb-glx0-dev libxcb-present-dev
+libxcb-randr0-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 x11proto-dev libdrm-dev
 libfreetype-dev libfontconfig-dev libpixman-1-dev libgl1-mesa-dev libegl1-mesa-dev
 libpcre2-dev libev-dev libconfig-dev libdbus-1-dev uthash-dev libspdlog-dev libfmt-dev
 libimlib2-dev libharfbuzz-dev zlib1g-dev
 xserver-xorg xinit x11-xserver-utils x11-utils
 xdotool xclip xsel xdg-utils
-sxhkd policykit-1-gnome feh nitrogen dunst
+sxhkd mate-polkit feh nitrogen dunst
 curl jq lm-sensors pulseaudio-utils wireplumber
 j4-dmenu-desktop perl
 fish
@@ -108,6 +110,9 @@ ok "Scripts deployed to $DEST"
 # ───────────── 3. shell hooks ─────────────
 section "Installing shell hooks (fish + bash)"
 
+# fish may have been installed but never launched (fresh box), so its config
+# dirs won't exist yet — create conf.d before writing into it.
+install -d "$HOME/.config/fish/conf.d"
 cat > "$HOME/.config/fish/conf.d/dwm-st-colors.fish" <<'_END_'
 # Auto-apply the dwm colorscheme palette to st (and any OSC-compatible terminal)
 # on every interactive shell startup. Populated by ~/.config/suckless/scripts/dwm-blocks/sync-colors.sh.
@@ -288,6 +293,9 @@ _END_
         ok "Wrote ~/.xinitrc — start dwm with: startx"
         ;;
     2)
+        # /usr/share/xsessions/ is normally created by a display manager; on a
+        # box without one installed yet the dir is absent, so create it first.
+        sudo mkdir -p /usr/share/xsessions
         sudo tee /usr/share/xsessions/dwm.desktop >/dev/null <<_END_
 [Desktop Entry]
 Encoding=UTF-8

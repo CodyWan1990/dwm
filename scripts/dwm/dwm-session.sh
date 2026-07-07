@@ -13,7 +13,8 @@ sxhkd &
 # polkit agent path differs by distro (Arch vs Debian) — start the first that exists.
 for p in /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 \
          /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1 \
-         /usr/libexec/polkit-gnome-authentication-agent-1; do
+         /usr/libexec/polkit-gnome-authentication-agent-1 \
+         /usr/libexec/polkit-mate-authentication-agent-1; do
     [ -x "$p" ] && { "$p" & break; }
 done
 picom &

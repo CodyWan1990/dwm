@@ -71,6 +71,7 @@ libxcomposite-dev libxdamage-dev libxfixes-dev libxrandr-dev libxxf86vm-dev
 libxcb1-dev libx11-xcb-dev libxcb-res0-dev libxcb-util-dev libxcb-render-util0-dev libxcb-image0-dev
 libxcb-composite0-dev libxcb-damage0-dev libxcb-glx0-dev libxcb-present-dev
 libxcb-randr0-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
+libxcb-dpms0-dev libxcb-sync-dev
 x11proto-dev libdrm-dev
 libfreetype-dev libfontconfig-dev libpixman-1-dev libgl1-mesa-dev libegl1-mesa-dev
 libpcre2-dev libev-dev libconfig-dev libdbus-1-dev uthash-dev libspdlog-dev libfmt-dev

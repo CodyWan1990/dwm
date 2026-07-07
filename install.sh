@@ -29,36 +29,72 @@ LOG=/tmp/suckless-install.log
 
 # ───────────── 0. preflight ─────────────
 section "Preflight"
-[ -f /etc/arch-release ] || { err "This installer is for Arch Linux."; exit 1; }
+if [ -r /etc/os-release ]; then . /etc/os-release; else err "No /etc/os-release — can't detect distro."; exit 1; fi
+case "${ID:-} ${ID_LIKE:-}" in
+    *arch*)            DISTRO=arch ;;
+    *debian*|*ubuntu*) DISTRO=debian ;;
+    *) err "Unsupported distro '${ID:-unknown}'. Only Arch- and Debian-family are wired up."; exit 1 ;;
+esac
 [ "$(id -u)" -ne 0 ]    || { err "Run as your normal user, not root (it'll sudo when needed)."; exit 1; }
 command -v sudo >/dev/null   || { err "sudo is required."; exit 1; }
 SRCDIR="$(cd "$(dirname "$0")" && pwd)"
+ok "Distro family: $DISTRO"
 ok "Source dir: $SRCDIR"
 ok "User: $USER  Home: $HOME"
 ok "Build log: $LOG"
 
 # ───────────── 1. pacman dependencies ─────────────
-section "Installing pacman packages"
-PKGS="
+section "Installing packages"
+
+# Two flat parallel lists rather than a name-map: most package names differ
+# between the two distros, so a diff-map buys nothing and reads worse.
+PKGS_ARCH="
 base-devel git make meson ninja pkgconf cmake
 libx11 libxinerama libxft libxrender libxres libxext libxcomposite
 libxdamage libxfixes libxrandr libxxf86vm libxcb xcb-util
 xcb-util-renderutil xcb-util-image xorgproto libdrm
 freetype2 fontconfig pixman mesa pcre2 libev libconfig dbus uthash
-spdlog fmt
+spdlog fmt imlib2 harfbuzz zlib
 xorg-server xorg-xinit xorg-xrandr xorg-xset xorg-xsetroot
 xorg-xprop xorg-xkill
 xdotool xclip xdg-utils
-sxhkd polkit-gnome feh dunst
+sxhkd polkit-gnome feh nitrogen dunst
 curl jq pacman-contrib lm_sensors libpulse wireplumber
 j4-dmenu-desktop perl
 fish
 "
+
+PKGS_DEBIAN="
+build-essential git make meson ninja-build pkg-config cmake
+libx11-dev libxinerama-dev libxft-dev libxrender-dev libxres-dev libxext-dev
+libxcomposite-dev libxdamage-dev libxfixes-dev libxrandr-dev libxxf86vm-dev
+libxcb1-dev libxcb-res0-dev libxcb-util-dev libxcb-render-util0-dev libxcb-image0-dev
+x11proto-dev libdrm-dev
+libfreetype-dev libfontconfig-dev libpixman-1-dev libgl1-mesa-dev libegl1-mesa-dev
+libpcre2-dev libev-dev libconfig-dev libdbus-1-dev uthash-dev libspdlog-dev libfmt-dev
+libimlib2-dev libharfbuzz-dev zlib1g-dev
+xserver-xorg xinit x11-xserver-utils x11-utils
+xdotool xclip xsel xdg-utils
+sxhkd policykit-1-gnome feh nitrogen dunst
+curl jq lm-sensors pulseaudio-utils wireplumber
+j4-dmenu-desktop perl
+fish
+"
+
 info "Updating package databases & installing dependencies"
-if sudo pacman -S --needed --noconfirm $PKGS >>"$LOG" 2>&1; then
-    ok "All pacman packages present"
+if [ "$DISTRO" = arch ]; then
+    if sudo pacman -S --needed --noconfirm $PKGS_ARCH >>"$LOG" 2>&1; then
+        ok "All pacman packages present"
+    else
+        err "pacman install failed — see $LOG"; exit 1
+    fi
 else
-    err "pacman install failed — see $LOG"; exit 1
+    sudo apt-get update >>"$LOG" 2>&1 || { err "apt-get update failed — see $LOG"; exit 1; }
+    if sudo apt-get install -y $PKGS_DEBIAN >>"$LOG" 2>&1; then
+        ok "All apt packages present"
+    else
+        err "apt install failed — see $LOG"; exit 1
+    fi
 fi
 
 # ───────────── 2. deploy scripts/ tree ─────────────
@@ -361,9 +397,13 @@ ok "Scripts in $HOME/.config/suckless/scripts/  Cache in $HOME/.cache/dwm-colors
 
 # Font check
 if ! fc-list 2>/dev/null | grep -qi monofur; then
-    warn "Monofur Nerd Font not found.  Install via AUR for the configured font;"
-    warn "  fallback to monospace will render but lose icons.  e.g.:"
-    warn "    yay -S ttf-monofur-nerd-font"
+    warn "Monofur Nerd Font not found.  Fallback to monospace will render but lose icons."
+    if [ "$DISTRO" = arch ]; then
+        warn "  Install via AUR:  yay -S ttf-monofur-nerd-font"
+    else
+        warn "  Not packaged in Debian — drop the Nerd Font TTFs into ~/.local/share/fonts"
+        warn "  (from github.com/ryanoasis/nerd-fonts) then run:  fc-cache -f"
+    fi
 fi
 
 # DPMS already-disabled hint for current session

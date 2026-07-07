@@ -9,8 +9,13 @@ xset s off         # Disable screensaver timeout
 xset s noblank     # Don't blank the video device
 xset -dpms         # Disable DPMS (Energy Star) power-down
 
-sxhkd &                                                                                                                         
-/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 &
+sxhkd &
+# polkit agent path differs by distro (Arch vs Debian) — start the first that exists.
+for p in /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 \
+         /usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1 \
+         /usr/libexec/polkit-gnome-authentication-agent-1; do
+    [ -x "$p" ] && { "$p" & break; }
+done
 picom &
 nitrogen --restore &
 dwmblocks &

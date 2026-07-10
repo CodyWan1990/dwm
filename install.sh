@@ -33,7 +33,8 @@ if [ -r /etc/os-release ]; then . /etc/os-release; else err "No /etc/os-release 
 case "${ID:-} ${ID_LIKE:-}" in
     *arch*)            DISTRO=arch ;;
     *debian*|*ubuntu*) DISTRO=debian ;;
-    *) err "Unsupported distro '${ID:-unknown}'. Only Arch- and Debian-family are wired up."; exit 1 ;;
+    *fedora*|*rhel*)   DISTRO=fedora ;;
+    *) err "Unsupported distro '${ID:-unknown}'. Only Arch-, Debian- and Fedora-family are wired up."; exit 1 ;;
 esac
 [ "$(id -u)" -ne 0 ]    || { err "Run as your normal user, not root (it'll sudo when needed)."; exit 1; }
 command -v sudo >/dev/null   || { err "sudo is required."; exit 1; }
@@ -84,21 +85,54 @@ j4-dmenu-desktop perl
 fish
 "
 
+# Fedora bundles all core xcb extension headers into libxcb-devel (unlike
+# Debian's split libxcb-*-dev), so this list is shorter on the xcb side.
+# zlib-devel and xorg-x11-apps aren't in current Fedora repos — use
+# zlib-ng-compat-devel (provides zlib) and the standalone xkill package.
+PKGS_FEDORA="
+gcc gcc-c++ make git meson ninja-build pkgconf-pkg-config cmake
+libX11-devel libXinerama-devel libXft-devel libXrender-devel libXres-devel
+libXext-devel libXcomposite-devel libXdamage-devel libXfixes-devel
+libXrandr-devel libXxf86vm-devel libxcb-devel
+xcb-util-devel xcb-util-renderutil-devel xcb-util-image-devel
+xorg-x11-proto-devel libdrm-devel
+freetype-devel fontconfig-devel pixman-devel mesa-libGL-devel mesa-libEGL-devel
+pcre2-devel libev-devel libconfig-devel dbus-devel uthash-devel
+spdlog-devel fmt-devel imlib2-devel harfbuzz-devel zlib-ng-compat-devel
+xorg-x11-server-Xorg xorg-x11-xinit xrandr xset xsetroot xprop xkill
+xdotool xclip xsel xdg-utils
+sxhkd mate-polkit feh nitrogen dunst
+curl jq lm_sensors pulseaudio-utils wireplumber
+j4-dmenu-desktop perl
+fish
+"
+
 info "Updating package databases & installing dependencies"
-if [ "$DISTRO" = arch ]; then
+case "$DISTRO" in
+arch)
     if sudo pacman -S --needed --noconfirm $PKGS_ARCH >>"$LOG" 2>&1; then
         ok "All pacman packages present"
     else
         err "pacman install failed — see $LOG"; exit 1
     fi
-else
+    ;;
+debian)
     sudo apt-get update >>"$LOG" 2>&1 || { err "apt-get update failed — see $LOG"; exit 1; }
     if sudo apt-get install -y $PKGS_DEBIAN >>"$LOG" 2>&1; then
         ok "All apt packages present"
     else
         err "apt install failed — see $LOG"; exit 1
     fi
-fi
+    ;;
+fedora)
+    # dnf refreshes metadata itself — no separate update step needed.
+    if sudo dnf install -y $PKGS_FEDORA >>"$LOG" 2>&1; then
+        ok "All dnf packages present"
+    else
+        err "dnf install failed — see $LOG"; exit 1
+    fi
+    ;;
+esac
 
 # ───────────── 2. deploy scripts/ tree ─────────────
 section "Deploying scripts/ to ~/.config/suckless/scripts/"
@@ -410,7 +444,7 @@ if ! fc-list 2>/dev/null | grep -qi monofur; then
     if [ "$DISTRO" = arch ]; then
         warn "  Install via AUR:  yay -S ttf-monofur-nerd-font"
     else
-        warn "  Not packaged in Debian — drop the Nerd Font TTFs into ~/.local/share/fonts"
+        warn "  Not packaged — drop the Nerd Font TTFs into ~/.local/share/fonts"
         warn "  (from github.com/ryanoasis/nerd-fonts) then run:  fc-cache -f"
     fi
 fi

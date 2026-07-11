@@ -29,7 +29,7 @@
 
 /* enums */
 enum { SchemeNorm, SchemeSel, SchemeNormHighlight, SchemeSelHighlight,
-       SchemeHp, SchemeOut, SchemeMid, SchemeLast }; /* color schemes */
+       SchemeHp, SchemeOut, SchemeLast }; /* color schemes */
 
 
 struct item {
@@ -220,8 +220,6 @@ drawitem(struct item *item, int x, int y, int w)
 	int r;
 	if (item == sel)
 		drw_setscheme(drw, scheme[SchemeSel]);
-	else if (item->left == sel || item->right == sel)
-		drw_setscheme(drw, scheme[SchemeMid]);
 	else if (item->hp)
 		drw_setscheme(drw, scheme[SchemeHp]);
 	else if (item->out)

@@ -20,7 +20,6 @@ static const char *colors[SchemeLast][2] = {
 	[SchemeNormHighlight] = { "#ffc978", "#222222" },
 	[SchemeOut] = { "#000000", "#00ffff" },
 	[SchemeHp]  = { "#bbbbbb", "#333333" },
-	[SchemeMid] = { "#eeeeee", "#3a4458" },
 };
 /* -l and -g options; if both > 0, dmenu uses a grid; -l alone is vertical list */
 static unsigned int lines      = 0;

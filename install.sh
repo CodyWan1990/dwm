@@ -58,8 +58,8 @@ freetype2 fontconfig pixman mesa pcre2 libev libconfig dbus uthash
 spdlog fmt imlib2 harfbuzz zlib
 xorg-server xorg-xinit xorg-xrandr xorg-xset xorg-xsetroot
 xorg-xprop xorg-xkill
-xdotool xclip xdg-utils
-sxhkd polkit-gnome feh nitrogen dunst
+xdotool xclip xdg-utils maim
+sxhkd polkit-gnome feh nitrogen dunst libnotify
 curl jq pacman-contrib lm_sensors libpulse wireplumber
 j4-dmenu-desktop perl
 fish
@@ -78,8 +78,8 @@ libfreetype-dev libfontconfig-dev libpixman-1-dev libgl1-mesa-dev libegl1-mesa-d
 libpcre2-dev libev-dev libconfig-dev libdbus-1-dev uthash-dev libspdlog-dev libfmt-dev
 libimlib2-dev libharfbuzz-dev zlib1g-dev
 xserver-xorg xinit x11-xserver-utils x11-utils
-xdotool xclip xsel xdg-utils
-sxhkd mate-polkit feh nitrogen dunst
+xdotool xclip xsel xdg-utils maim
+sxhkd mate-polkit feh nitrogen dunst libnotify-bin
 curl jq lm-sensors pulseaudio-utils wireplumber
 j4-dmenu-desktop perl
 fish
@@ -100,8 +100,8 @@ freetype-devel fontconfig-devel pixman-devel mesa-libGL-devel mesa-libEGL-devel
 pcre2-devel libev-devel libconfig-devel dbus-devel uthash-devel
 spdlog-devel fmt-devel imlib2-devel harfbuzz-devel zlib-ng-compat-devel
 xorg-x11-server-Xorg xorg-x11-xinit xrandr xset xsetroot xprop xkill
-xdotool xclip xsel xdg-utils
-sxhkd mate-polkit feh nitrogen dunst
+xdotool xclip xsel xdg-utils maim
+sxhkd mate-polkit feh nitrogen dunst libnotify
 curl jq lm_sensors pulseaudio-utils wireplumber
 j4-dmenu-desktop perl
 fish
@@ -258,7 +258,7 @@ blur-background-exclude = [
 animations = true;
 
 # Animation settings for window movement/resizing
-animation-stiffness = 125;        # How "springy" the animation is (lower = more spring)
+animation-stiffness-in-tag = 200; # Keep the current effective window zoom timing
 animation-window-mass = 1.2;      # Window mass (higher = slower movement)
 animation-dampening = 25;         # How quickly animation settles (higher = faster settle)
 animation-clamping = true;        # Clamp animations (kills bouncy overshoot)
@@ -267,6 +267,12 @@ animation-clamping = true;        # Clamp animations (kills bouncy overshoot)
 # "none", "fly-in", "zoom", "slide-up", "slide-down", "slide-left", "slide-right"
 animation-for-open-window = "zoom";
 animation-for-unmap-window = "zoom";
+
+# Traditional workspace transition: no off-screen movement, just a subtle fade.
+animation-for-prev-tag = "none";
+enable-fading-prev-tag = true;
+animation-for-next-tag = "none";
+enable-fading-next-tag = true;
 
 animation-exclude = [
   "class_g = 'slop'",
@@ -303,11 +309,20 @@ _END_
     ok "Wrote ~/.config/picom/picom.conf (FT-Labs-picom flavor with animations)"
 fi
 
-# ───────────── 4. seed colorscheme cache ─────────────
-section "Seeding default colorscheme (Monokai Pro)"
-"$HOME/.config/suckless/scripts/dwm-blocks/sync-colors.sh" monokai >>"$LOG" 2>&1 \
-    && ok "Cache populated at ~/.cache/dwm-colorscheme/" \
-    || warn "sync-colors.sh failed (run it manually after dwm is built)"
+# ───────────── 4. seed colorscheme cache + Dunst config ─────────────
+section "Installing default colorscheme and Dunst config (Monokai Pro)"
+DUNST_CONFIG="$HOME/.config/dunst/dunstrc"
+if "$HOME/.config/suckless/scripts/dwm-blocks/sync-colors.sh" monokai >>"$LOG" 2>&1; then
+    ok "Cache populated at ~/.cache/dwm-colorscheme/"
+    if [ -r "$DUNST_CONFIG" ]; then
+        ok "Generated theme-synced Dunst config at ~/.config/dunst/dunstrc"
+    else
+        warn "Dunst config was not generated"
+        warn "Run: ~/.config/suckless/scripts/dunst/render-dunstrc.sh ~/.cache/dwm-colorscheme/colors.sh"
+    fi
+else
+    warn "sync-colors.sh failed (run it manually after dwm is built)"
+fi
 
 # ───────────── 5. session entry — interactive prompt ─────────────
 section "Session entry point"

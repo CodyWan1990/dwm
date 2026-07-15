@@ -15,6 +15,8 @@ typedef struct Fnt {
 enum { ColFg, ColBg }; /* Clr scheme index */
 typedef XftColor Clr;
 
+typedef struct Img Img;
+
 typedef struct {
 	unsigned int w, h;
 	Display *dpy;
@@ -53,6 +55,9 @@ void drw_setscheme(Drw *drw, Clr *scm);
 /* Drawing functions */
 void drw_rect(Drw *drw, int x, int y, unsigned int w, unsigned int h, int filled, int invert);
 int drw_text(Drw *drw, int x, int y, unsigned int w, unsigned int h, unsigned int lpad, const char *text, int invert);
+Img *drw_img_create(Drw *drw, const char *path);
+void drw_img_free(Img *img);
+void drw_img(Drw *drw, Img *img, int x, int y, unsigned int w, unsigned int h);
 
 /* Map functions */
 void drw_map(Drw *drw, Window win, int x, int y, unsigned int w, unsigned int h);

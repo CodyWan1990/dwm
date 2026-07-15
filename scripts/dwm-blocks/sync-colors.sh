@@ -15,6 +15,16 @@ printf '%s\n' "$SCHEME" > "$CACHE_DIR/current"
 # shellcheck disable=SC1091
 . "$CACHE_DIR/colors.sh"
 
+# Regenerate Dunst's square notification theme from the same palette. Keep
+# terminal and status-bar recoloring functional if Dunst is unavailable.
+DUNST_RENDERER=$(dirname "$0")/../dunst/render-dunstrc.sh
+DUNST_CONFIG="$HOME/.config/dunst/dunstrc"
+if [ -x "$DUNST_RENDERER" ] && "$DUNST_RENDERER" "$CACHE_DIR/colors.sh"; then
+    if command -v dunstctl >/dev/null 2>&1; then
+        dunstctl reload "$DUNST_CONFIG" >/dev/null 2>&1 || true
+    fi
+fi
+
 # Build a precomputed OSC blob that any OSC-aware terminal (st, xterm, ...) will
 # accept. New shells `cat` this on startup; sync writes it to live ptys below.
 OSC_FILE="$CACHE_DIR/st-osc.txt"
@@ -54,7 +64,7 @@ for st_pid in $(pgrep -x st 2>/dev/null); do
     esac
 done
 
-# Refresh every dwmblocks block (signals are 1..N — we have 5 active blocks today
+# Refresh every dwmblocks block (signals are 1..N — we have 6 active blocks today
 # but iterate up to 9 to cover future expansion within DELIMITERENDCHAR=10).
 for sig in 1 2 3 4 5 6 7 8 9; do
     pkill -RTMIN+"$sig" dwmblocks 2>/dev/null || true

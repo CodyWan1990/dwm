@@ -35,6 +35,7 @@ static Block blocks[] = {
         { PATH("dwm-memory.sh"),    NULL,                               5,        2 },
         { PATH("dwm-volume.sh"),    CLICK("dwm-volume-click.sh"),       0,        3 },
         { PATH("dwm-clock.sh"),     NULL,                               30,       4 },
+        { PATH("dwm-notifications.sh"), CLICK("dwm-notifications-click.sh"), 2,  6 },
         { PATH("dwm-powermenu.sh"), CLICK("dwm-powermenu-click.sh"),    0,        5 },
         { NULL }
 };

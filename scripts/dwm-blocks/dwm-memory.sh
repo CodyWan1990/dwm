@@ -13,7 +13,7 @@ PERCENT=$(awk "BEGIN {printf \"%.0f\", (($TOTAL - $AVAILABLE) / $TOTAL) * 100}")
 
 # Color based on usage
 if [ "$PERCENT" -lt 50 ]; then
-    color="#${GREEN}"
+    color="#${CYAN}"
 elif [ "$PERCENT" -lt 75 ]; then
     color="#${YELLOW}"
 else

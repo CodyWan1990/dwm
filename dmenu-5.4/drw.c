@@ -4,11 +4,17 @@
 #include <string.h>
 #include <X11/Xlib.h>
 #include <X11/Xft/Xft.h>
+#include <Imlib2.h>
 
 #include "drw.h"
 #include "util.h"
 
 #define UTF_INVALID 0xFFFD
+
+struct Img {
+	Imlib_Image image;
+	int w, h;
+};
 
 static int
 utf8decode(const char *s_in, long *u, int *err)
@@ -219,6 +225,60 @@ drw_rect(Drw *drw, int x, int y, unsigned int w, unsigned int h, int filled, int
 		XFillRectangle(drw->dpy, drw->drawable, drw->gc, x, y, w, h);
 	else
 		XDrawRectangle(drw->dpy, drw->drawable, drw->gc, x, y, w - 1, h - 1);
+}
+
+Img *
+drw_img_create(Drw *drw, const char *path)
+{
+	Img *img;
+	Imlib_Image image;
+
+	if (!drw || !path || !*path)
+		return NULL;
+	imlib_context_set_display(drw->dpy);
+	imlib_context_set_visual(DefaultVisual(drw->dpy, drw->screen));
+	imlib_context_set_colormap(DefaultColormap(drw->dpy, drw->screen));
+	if (!(image = imlib_load_image(path)))
+		return NULL;
+	imlib_context_set_image(image);
+	img = ecalloc(1, sizeof *img);
+	img->image = image;
+	img->w = imlib_image_get_width();
+	img->h = imlib_image_get_height();
+	return img;
+}
+
+void
+drw_img_free(Img *img)
+{
+	if (!img)
+		return;
+	imlib_context_set_image(img->image);
+	imlib_free_image();
+	free(img);
+}
+
+void
+drw_img(Drw *drw, Img *img, int x, int y, unsigned int w, unsigned int h)
+{
+	unsigned int rw, rh;
+
+	if (!drw || !img || !w || !h || img->w <= 0 || img->h <= 0)
+		return;
+	if ((unsigned long)img->w * h > (unsigned long)img->h * w) {
+		rw = w;
+		rh = MAX(1, (unsigned int)((unsigned long)img->h * w / img->w));
+	} else {
+		rh = h;
+		rw = MAX(1, (unsigned int)((unsigned long)img->w * h / img->h));
+	}
+	imlib_context_set_display(drw->dpy);
+	imlib_context_set_visual(DefaultVisual(drw->dpy, drw->screen));
+	imlib_context_set_colormap(DefaultColormap(drw->dpy, drw->screen));
+	imlib_context_set_drawable(drw->drawable);
+	imlib_context_set_image(img->image);
+	imlib_context_set_blend(1);
+	imlib_render_image_on_drawable_at_size(x + (w - rw) / 2, y + (h - rh) / 2, rw, rh);
 }
 
 int

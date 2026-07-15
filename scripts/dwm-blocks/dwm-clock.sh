@@ -10,4 +10,4 @@ TIME=$(date '+%I:%M %p')
 
 printf "^c#%s^📅 %s  %s^d^  ^c#%s^🕐 %s^d^" \
     "$BLUE" "$DAY" "$DATE" \
-    "$YELLOW" "$TIME"
+    "$BLUE" "$TIME"

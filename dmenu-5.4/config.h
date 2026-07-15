@@ -27,6 +27,10 @@ static unsigned int columns    = 0;
 /* -h option; minimum height of a menu line */
 static unsigned int lineheight = 0;
 static unsigned int min_lineheight = 8;
+/* Application icons; opt in with -I and override the size with -is. */
+static int icons = 0;
+static unsigned int iconsize = 22;
+static unsigned int iconpadding = 8;
 
 /*
  * Characters not considered part of a word while deleting words

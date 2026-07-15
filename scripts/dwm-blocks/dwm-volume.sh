@@ -22,5 +22,5 @@ elif [ "$VOL" -gt 100 ]; then
 elif [ "$VOL" -gt 50 ]; then
     printf "^c#%s^🔊 %s%%^d^" "$MAUVE" "$VOL"
 else
-    printf "^c#%s^🔉 %s%%^d^" "$BLUE" "$VOL"
+    printf "^c#%s^🔉 %s%%^d^" "$MAUVE" "$VOL"
 fi

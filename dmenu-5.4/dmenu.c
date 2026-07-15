@@ -35,9 +35,11 @@ enum { SchemeNorm, SchemeSel, SchemeNormHighlight, SchemeSelHighlight,
 struct item {
 	char *text;
 	char *stext;
+	char *iconpath;
+	Img *icon;
 	unsigned int width;
 	struct item *left, *right;
-	int out, hp;
+	int out, hp, iconloaded;
 	double distance;
 };
 
@@ -149,6 +151,8 @@ cleanup(void)
 	for (i = 0; i < SchemeLast; i++)
 		free(scheme[i]);
 	for (i = 0; items && items[i].text; ++i) {
+		drw_img_free(items[i].icon);
+		free(items[i].iconpath);
 		free(items[i].text);
 		free(items[i].stext);
 	}
@@ -217,6 +221,8 @@ drawhighlights(struct item *item, int x, int y, int maxw)
 static int
 drawitem(struct item *item, int x, int y, int w)
 {
+	unsigned int drawsize = MIN(iconsize, (unsigned int)bh);
+	int iconw = icons && item->iconpath ? drawsize + iconpadding : 0;
 	int r;
 	if (item == sel)
 		drw_setscheme(drw, scheme[SchemeSel]);
@@ -227,8 +233,17 @@ drawitem(struct item *item, int x, int y, int w)
 	else
 		drw_setscheme(drw, scheme[SchemeNorm]);
 
-	r = drw_text(drw, x, y, w, bh, lrpad / 2, item->stext, 0);
-	drawhighlights(item, x, y, w);
+	r = drw_text(drw, x, y, w, bh, lrpad / 2 + iconw, item->stext, 0);
+	drawhighlights(item, x + iconw, y, MAX(0, w - iconw));
+	if (icons && item->iconpath) {
+		if (!item->iconloaded) {
+			item->icon = drw_img_create(drw, item->iconpath);
+			item->iconloaded = 1;
+		}
+		if (item->icon)
+			drw_img(drw, item->icon, x + lrpad / 2, y + (bh - drawsize) / 2,
+			        drawsize, drawsize);
+	}
 	return r;
 }
 
@@ -949,6 +964,7 @@ readstdin(void)
 				die("cannot realloc %zu bytes:", itemsiz * sizeof(*items));
 		}
 		char *tab;
+		items[i] = (struct item){0};
 		if (line[len - 1] == '\n')
 			line[len - 1] = '\0';
 		if (!(items[i].text = strdup(line)))
@@ -956,6 +972,8 @@ readstdin(void)
 		/* tsv: stext is the part before the first tab; if no tab, stext == text. */
 		if ((tab = strchr(line, '\t')))
 			*tab = '\0';
+		if (icons && tab && tab[1] && !(items[i].iconpath = strdup(tab + 1)))
+			die("strdup:");
 		if (!(items[i].stext = strdup(line)))
 			die("strdup:");
 		items[i].width = TEXTW(line);
@@ -969,7 +987,7 @@ readstdin(void)
 	}
 	free(line);
 	if (items)
-		items[i].text = NULL;
+		items[i] = (struct item){0};
 	lines = MIN(lines, i);
 }
 
@@ -1137,7 +1155,7 @@ setup(void)
 static void
 usage(void)
 {
-	die("usage: dmenu [-bcFfiPv] [-l lines] [-h height] [-bw border] [-p prompt] [-fn font] [-m monitor]\n"
+	die("usage: dmenu [-bcFfiIPv] [-l lines] [-h height] [-is pixels] [-bw border] [-p prompt] [-fn font] [-m monitor]\n"
 	    "             [-nb color] [-nf color] [-sb color] [-sf color]\n"
 	    "             [-nhb color] [-nhf color] [-shb color] [-shf color]\n"
 	    "             [-hb color] [-hf color] [-hp items] [-w windowid]");
@@ -1169,6 +1187,8 @@ main(int argc, char *argv[])
 			;
 		else if (!strcmp(argv[i], "-P"))   /* is the input a password */
 			passwd = 1;
+		else if (!strcmp(argv[i], "-I"))   /* parse and draw TSV icon paths */
+			icons = 1;
 		else if (i + 1 == argc)
 			usage();
 		/* these options take one argument */
@@ -1183,6 +1203,10 @@ main(int argc, char *argv[])
 		else if (!strcmp(argv[i], "-h")) { /* minimum height of one menu line */
 			lineheight = atoi(argv[++i]);
 			lineheight = MAX(lineheight, min_lineheight);
+		}
+		else if (!strcmp(argv[i], "-is")) { /* application icon size */
+			iconsize = atoi(argv[++i]);
+			iconsize = MAX(1, iconsize);
 		}
 		else if (!strcmp(argv[i], "-m"))
 			mon = atoi(argv[++i]);

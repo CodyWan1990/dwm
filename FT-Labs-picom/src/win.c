@@ -690,9 +690,23 @@ void win_process_update_flags(session_t *ps, struct managed_win *w) {
         // Determine if a window should animate
 		if (win_should_animate(ps, w)) {
 			win_update_bounding_shape(ps, w);
-			if (w->pending_g.y < 0 && w->g.y > 0 && abs(w->pending_g.y - w->g.y) >= w->pending_g.height)
+			// DWM's stock showhide() moves hidden clients horizontally to a
+			// negative X coordinate. Keep the vertical checks for WMs that move
+			// clients above/below the screen, and recognize DWM's X movement too.
+			bool moved_off_tag =
+			    (w->pending_g.y < 0 && w->g.y >= 0 &&
+			     abs(w->pending_g.y - w->g.y) >= w->pending_g.height) ||
+			    (w->pending_g.x < 0 && w->g.x >= 0 &&
+			     abs(w->pending_g.x - w->g.x) >= w->pending_g.width);
+			bool moved_onto_tag =
+			    (w->pending_g.y >= 0 && w->g.y < 0 &&
+			     abs(w->pending_g.y - w->g.y) >= w->pending_g.height) ||
+			    (w->pending_g.x >= 0 && w->g.x < 0 &&
+			     abs(w->pending_g.x - w->g.x) >= w->pending_g.width);
+
+			if (moved_off_tag)
 				w->dwm_mask = ANIM_PREV_TAG;
-			else if (w->pending_g.y > 0 && w->g.y < 0 && abs(w->pending_g.y - w->g.y) >= w->pending_g.height)
+			else if (moved_onto_tag)
 				w->dwm_mask = ANIM_NEXT_TAG;
 
 			if (!was_visible || w->dwm_mask) {

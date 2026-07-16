@@ -28,5 +28,16 @@ picom &
 nitrogen --restore &
 dunst &
 dwmblocks &
+dwmblocks_pid=$!
+"$HOME/.config/suckless/scripts/dwm-blocks/dwm-events.sh" &
+dwm_events_pid=$!
 clipmenud &
-exec dwm
+
+cleanup_status() {
+    kill "$dwm_events_pid" "$dwmblocks_pid" 2>/dev/null || true
+    wait "$dwm_events_pid" "$dwmblocks_pid" 2>/dev/null || true
+}
+trap cleanup_status EXIT
+trap 'exit 0' INT TERM HUP
+
+dwm

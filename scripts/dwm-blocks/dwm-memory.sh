@@ -4,20 +4,27 @@
 . "$HOME/.cache/dwm-colorscheme/colors.sh" 2>/dev/null \
   || . "$HOME/.config/suckless/scripts/colorschemes/monokai.sh"
 
-TOTAL=$(grep MemTotal /proc/meminfo | awk '{print $2}')
-AVAILABLE=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
-
-USED_GB=$(awk "BEGIN {printf \"%.1f\", ($TOTAL - $AVAILABLE) / 1024 / 1024}")
-TOTAL_GB=$(awk "BEGIN {printf \"%.0f\", $TOTAL / 1024 / 1024}")
-PERCENT=$(awk "BEGIN {printf \"%.0f\", (($TOTAL - $AVAILABLE) / $TOTAL) * 100}")
+set -- $(awk '
+    $1 == "MemTotal:" { total = $2 }
+    $1 == "MemAvailable:" { available = $2 }
+    END {
+        if (total > 0)
+            printf "%.1f %.0f %.0f\n", (total - available) / 1048576,
+                   total / 1048576, ((total - available) / total) * 100
+    }
+' /proc/meminfo)
+[ "$#" -eq 3 ] || exit 0
+used_gb=$1
+total_gb=$2
+percent=$3
 
 # Color based on usage
-if [ "$PERCENT" -lt 50 ]; then
+if [ "$percent" -lt 50 ]; then
     color="#${CYAN}"
-elif [ "$PERCENT" -lt 75 ]; then
+elif [ "$percent" -lt 75 ]; then
     color="#${YELLOW}"
 else
     color="#${RED}"
 fi
 
-printf "^c%s^🧠 %sG/%sG^d^" "$color" "$USED_GB" "$TOTAL_GB"
+printf "^c%s^🧠 %sG/%sG^d^" "$color" "$used_gb" "$total_gb"

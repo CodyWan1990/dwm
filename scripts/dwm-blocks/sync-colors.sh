@@ -64,9 +64,8 @@ for st_pid in $(pgrep -x st 2>/dev/null); do
     esac
 done
 
-# Refresh every dwmblocks block (signals are 1..N — we have 6 active blocks today
-# but iterate up to 9 to cover future expansion within DELIMITERENDCHAR=10).
-for sig in 1 2 3 4 5 6 7 8 9; do
-    pkill -RTMIN+"$sig" dwmblocks 2>/dev/null || true
+# Refresh every configured block on this display.
+for sig in 1 2 3 4 5 6; do
+    sigdwmblocks "$sig" >/dev/null 2>&1 || true
 done
 exit 0

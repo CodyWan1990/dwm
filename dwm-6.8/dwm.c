@@ -21,6 +21,8 @@
  * To understand everything else, start reading main().
  */
 #include <errno.h>
+#include <ctype.h>
+#include <limits.h>
 #include <locale.h>
 #include <signal.h>
 #include <stdarg.h>
@@ -62,6 +64,7 @@
 #define HEIGHT(X)               ((X)->h + 2 * (X)->bw)
 #define TAGMASK                 ((1 << LENGTH(tags)) - 1)
 #define TEXTW(X)                (drw_fontset_getwidth(drw, (X)) + lrpad)
+#define SYSTRAYACTIVE           (showsystray && systray && !systrayunavailable)
 
 #define SYSTEM_TRAY_REQUEST_DOCK    0
 #define SYSTRAYICONSIZE            18
@@ -203,7 +206,10 @@ static Monitor *dirtomon(int dir);
 static void drawbar(Monitor *m);
 static void drawbars(void);
 static int drawstatusbar(Monitor *m, int bh, char* text);
+static void statusadd(int *total, long value);
+static void parsestatuscode(char *code, char *end, int draw, int *x);
 static int statussegw(char *seg);
+static int statuswidth(char *text);
 static void enternotify(XEvent *e);
 static void expose(XEvent *e);
 static void focus(Client *c);
@@ -215,6 +221,7 @@ static Atom getatomprop(Client *c, Atom prop);
 static int getrootptr(int *x, int *y);
 static long getstate(Window w);
 static pid_t getstatusbarpid(void);
+static int isstatusbarpid(pid_t pid);
 static unsigned int getsystraywidth();
 static int gettextprop(Window w, Atom atom, char *text, unsigned int size);
 static void grabbuttons(Client *c, int focused);
@@ -301,6 +308,7 @@ static pid_t winpid(Window w);
 
 /* variables */
 static Systray *systray = NULL;
+static int systrayunavailable = 0;
 static const char broken[] = "broken";
 static char stext[1024];
 static int statusw;
@@ -518,7 +526,7 @@ swallow(Client *p, Client *c)
 
 	if (c->noswallow || c->isterminal)
 		return;
-	if (c->noswallow && !swallowfloating && c->isfloating)
+	if (!swallowfloating && c->isfloating)
 		return;
 
 	detach(c);
@@ -562,7 +570,8 @@ unswallow(Client *c)
 void
 buttonpress(XEvent *e)
 {
-	unsigned int i, x, click;
+	int trayw, x;
+	unsigned int i, click;
 	Arg arg = {0};
 	Client *c;
 	Monitor *m;
@@ -586,28 +595,32 @@ buttonpress(XEvent *e)
 			arg.ui = 1 << i;
 		} else if (ev->x < x + TEXTW(selmon->ltsymbol))
 			click = ClkLtSymbol;
-		else if (ev->x > selmon->ww - statusw - getsystraywidth()) {
-			x = selmon->ww - statusw - getsystraywidth();
-			click = ClkStatusText;
-			statussig = 0;
-			for (text = s = stext; *s && x <= ev->x; s++) {
-				if ((unsigned char)(*s) < ' ') {
-					ch = *s;
-					*s = '\0';
-					x += statussegw(text);
-					*s = ch;
-					text = s + 1;
-					if (x >= ev->x)
-						break;
-					/* End clickable section on a matching signal raw byte */
-					if (statussig == ch)
-						statussig = 0;
-					else
-						statussig = ch;
+		else {
+			trayw = SYSTRAYACTIVE && selmon == systraytomon(selmon) && !systrayonleft
+			        ? (int)getsystraywidth() : 0;
+			if (ev->x > selmon->ww - statusw - trayw) {
+				x = selmon->ww - statusw - trayw;
+				click = ClkStatusText;
+				statussig = 0;
+				for (text = s = stext; *s && x <= ev->x; s++) {
+					if ((unsigned char)(*s) < ' ') {
+						ch = *s;
+						*s = '\0';
+						statusadd(&x, statussegw(text));
+						*s = ch;
+						text = s + 1;
+						if (x >= ev->x)
+							break;
+						/* End clickable section on a matching signal raw byte */
+						if (statussig == ch)
+							statussig = 0;
+						else
+							statussig = ch;
+					}
 				}
-			}
-		} else
-			click = ClkWinTitle;
+			} else
+				click = ClkWinTitle;
+		}
 	} else if ((c = wintoclient(ev->window))) {
 		focus(c);
 		restack(selmon);
@@ -648,7 +661,7 @@ cleanup(void)
 	while (mons)
 		cleanupmon(mons);
 
-	if (showsystray) {
+	if (SYSTRAYACTIVE) {
 		XUnmapWindow(dpy, systray->win);
 		XDestroyWindow(dpy, systray->win);
 		free(systray);
@@ -690,7 +703,7 @@ clientmessage(XEvent *e)
 	XClientMessageEvent *cme = &e->xclient;
 	Client *c = wintoclient(cme->window);
 
-	if (showsystray && cme->window == systray->win && cme->message_type == netatom[NetSystemTrayOP]) {
+	if (SYSTRAYACTIVE && cme->window == systray->win && cme->message_type == netatom[NetSystemTrayOP]) {
 		/* add systray icons */
 		if (cme->data.l[1] == SYSTEM_TRAY_REQUEST_DOCK) {
 			if (!(c = (Client *)calloc(1, sizeof(Client))))
@@ -756,7 +769,7 @@ colormapnotify(XEvent *e)
 	XColormapEvent *ev = &e->xcolormap;
 	Client *i = wintosystrayicon(ev->window);
 
-	if (!showsystray || !i || ev->colormap == None)
+	if (!SYSTRAYACTIVE || !i || ev->colormap == None)
 		return;
 	XInstallColormap(dpy, ev->colormap);
 }
@@ -969,43 +982,137 @@ dirtomon(int dir)
 	return m;
 }
 
+void
+statusadd(int *total, long value)
+{
+	long sum = (long)*total + value;
+
+	if (sum >= INT_MIN && sum <= INT_MAX)
+		*total = (int)sum;
+}
+
+void
+parsestatuscode(char *code, char *end, int draw, int *x)
+{
+	char buf[8], *next, *p = code;
+	int i, rect[4];
+	long value;
+
+	while (p < end) {
+		switch (*p) {
+		case 'c':
+		case 'b':
+			if (end - p >= 8 && p[1] == '#') {
+				for (i = 2; i < 8 && isxdigit((unsigned char)p[i]); i++);
+				if (i == 8) {
+					if (draw) {
+						memcpy(buf, p + 1, 7);
+						buf[7] = '\0';
+						drw_clr_create(drw,
+						    &drw->scheme[*p == 'c' ? ColFg : ColBg], buf);
+					}
+					p += 8;
+					break;
+				}
+			}
+			p++;
+			break;
+		case 'd':
+			if (draw) {
+				drw->scheme[ColFg] = scheme[SchemeNorm][ColFg];
+				drw->scheme[ColBg] = scheme[SchemeNorm][ColBg];
+			}
+			p++;
+			break;
+		case 'f':
+			errno = 0;
+			value = strtol(p + 1, &next, 10);
+			if (next > p + 1 && next <= end && errno != ERANGE
+			&& value >= INT_MIN && value <= INT_MAX) {
+				statusadd(x, value);
+				p = next;
+			} else
+				p++;
+			break;
+		case 'r':
+			next = p + 1;
+			for (i = 0; i < 4; i++) {
+				char *numberend;
+
+				errno = 0;
+				value = strtol(next, &numberend, 10);
+				if (numberend == next || numberend > end || errno == ERANGE
+				|| value < INT_MIN || value > INT_MAX
+				|| (i < 3 && (numberend == end || *numberend != ',')))
+					break;
+				rect[i] = (int)value;
+				next = numberend + (i < 3);
+			}
+			if (i == 4) {
+				long rectx = (long)*x + rect[0];
+
+				if (draw && rectx >= INT_MIN && rectx <= INT_MAX
+				&& rect[2] >= 0 && rect[3] >= 0)
+					drw_rect(drw, (int)rectx, rect[1], rect[2], rect[3], 1, 0);
+				p = next;
+			} else
+				p++;
+			break;
+		default:
+			p++;
+			break;
+		}
+	}
+}
+
 /* Rendered width of a single status segment (between statuscmd signal bytes),
- * accounting for status2d ^...^ codes. Mutates seg in place but restores it. */
+ * accounting for bounded status2d ^...^ codes. Mutates seg in place but
+ * restores it. An unmatched caret is rendered as ordinary text. */
 int
 statussegw(char *seg)
 {
-	int w = 0, i;
-	short isCode = 0;
-	char *text = seg;
+	char ch, *end, *text = seg;
+	int w = 0;
 
-	i = -1;
-	while (text[++i]) {
-		if (text[i] == '^') {
-			if (!isCode) {
-				isCode = 1;
-				text[i] = '\0';
-				w += TEXTW(text) - lrpad;
-				text[i] = '^';
-				if (text[++i] == 'f')
-					w += atoi(text + ++i);
-			} else {
-				isCode = 0;
-				text = text + i + 1;
-				i = -1;
-			}
-		}
+	while ((end = strchr(text, '^'))) {
+		char *close = strchr(end + 1, '^');
+
+		if (!close)
+			break;
+		ch = *end;
+		*end = '\0';
+		statusadd(&w, TEXTW(text) - lrpad);
+		*end = ch;
+		parsestatuscode(end + 1, close, 0, &w);
+		text = close + 1;
 	}
-	if (!isCode)
-		w += TEXTW(text) - lrpad;
+	statusadd(&w, TEXTW(text) - lrpad);
 	return w;
 }
 
 int
+statuswidth(char *text)
+{
+	char ch, *segment, *s;
+	int w = 0;
+
+	for (segment = s = text; *s; s++) {
+		if ((unsigned char)*s >= ' ')
+			continue;
+		ch = *s;
+		*s = '\0';
+		statusadd(&w, statussegw(segment));
+		*s = ch;
+		segment = s + 1;
+	}
+	statusadd(&w, statussegw(segment));
+	return MAX(w, 0);
+}
+
+int
 drawstatusbar(Monitor *m, int bh, char* stext) {
-	int ret, i, w, x, len;
-	short isCode = 0;
-	char *text;
-	char *p;
+	char ch, *close, *marker, *p, *text;
+	int ret, w, x, len;
 
 	len = strlen(stext) + 1 ;
 	if (!(text = (char*) malloc(sizeof(char)*len)))
@@ -1013,42 +1120,11 @@ drawstatusbar(Monitor *m, int bh, char* stext) {
 	p = text;
 	memcpy(text, stext, len);
 
-	/* compute width of the status text */
-	w = 0;
-	i = -1;
-	while (text[++i]) {
-		if (text[i] == '^') {
-			if (!isCode) {
-				isCode = 1;
-				text[i] = '\0';
-				w += TEXTW(text) - lrpad;
-				text[i] = '^';
-				if (text[++i] == 'f')
-					w += atoi(text + ++i);
-			} else {
-				isCode = 0;
-				text = text + i + 1;
-				i = -1;
-			}
-		} else if ((unsigned char)text[i] < ' ') {
-			/* statuscmd signal byte: invisible segment delimiter */
-			char ch = text[i];
-			text[i] = '\0';
-			w += TEXTW(text) - lrpad;
-			text[i] = ch;
-			text = text + i + 1;
-			i = -1;
-		}
-	}
-	if (!isCode)
-		w += TEXTW(text) - lrpad;
-	else
-		isCode = 0;
-	text = p;
-
-	w += 2; /* 1px padding on both sides */
+	w = statuswidth(text);
+	statusadd(&w, 2); /* 1px padding on both sides */
 	ret = x = m->ww - w
-	       - (showsystray && m == systraytomon(m) && !systrayonleft ? getsystraywidth() : 0);
+	       - (SYSTRAYACTIVE && m == systraytomon(m) && !systrayonleft
+	          ? (int)getsystraywidth() : 0);
 
 	drw_setscheme(drw, statusscratch);
 	drw->scheme[ColFg] = scheme[SchemeNorm][ColFg];
@@ -1056,67 +1132,30 @@ drawstatusbar(Monitor *m, int bh, char* stext) {
 	drw_rect(drw, x, 0, w, bh, 1, 1);
 	x++;
 
-	/* process status text */
-	i = -1;
-	while (text[++i]) {
-		if (text[i] == '^' && !isCode) {
-			isCode = 1;
-
-			text[i] = '\0';
-			w = TEXTW(text) - lrpad;
-			drw_text(drw, x, 0, w, bh, 0, text, 0);
-
-			x += w;
-
-			/* process code */
-			while (text[++i] != '^') {
-				if (text[i] == 'c') {
-					char buf[8];
-					memcpy(buf, (char*)text+i+1, 7);
-					buf[7] = '\0';
-					drw_clr_create(drw, &drw->scheme[ColFg], buf);
-					i += 7;
-				} else if (text[i] == 'b') {
-					char buf[8];
-					memcpy(buf, (char*)text+i+1, 7);
-					buf[7] = '\0';
-					drw_clr_create(drw, &drw->scheme[ColBg], buf);
-					i += 7;
-				} else if (text[i] == 'd') {
-					drw->scheme[ColFg] = scheme[SchemeNorm][ColFg];
-					drw->scheme[ColBg] = scheme[SchemeNorm][ColBg];
-				} else if (text[i] == 'r') {
-					int rx = atoi(text + ++i);
-					while (text[++i] != ',');
-					int ry = atoi(text + ++i);
-					while (text[++i] != ',');
-					int rw = atoi(text + ++i);
-					while (text[++i] != ',');
-					int rh = atoi(text + ++i);
-
-					drw_rect(drw, rx + x, ry, rw, rh, 1, 0);
-				} else if (text[i] == 'f') {
-					x += atoi(text + ++i);
-				}
-			}
-
-			text = text + i + 1;
-			i=-1;
-			isCode = 0;
-		} else if ((unsigned char)text[i] < ' ' && !isCode) {
-			/* statuscmd signal byte: invisible segment delimiter */
-			text[i] = '\0';
-			w = TEXTW(text) - lrpad;
-			drw_text(drw, x, 0, w, bh, 0, text, 0);
-			x += w;
-			text = text + i + 1;
-			i = -1;
-		}
-	}
-
-	if (!isCode) {
+	/* Draw plain chunks and process only complete, bounded status2d codes. */
+	while (*text) {
+		for (marker = text; *marker && *marker != '^'
+		&& (unsigned char)*marker >= ' '; marker++);
+		ch = *marker;
+		*marker = '\0';
 		w = TEXTW(text) - lrpad;
 		drw_text(drw, x, 0, w, bh, 0, text, 0);
+		statusadd(&x, w);
+		*marker = ch;
+		if (!ch)
+			break;
+		if ((unsigned char)ch < ' ') {
+			text = marker + 1;
+			continue;
+		}
+		if (!(close = strchr(marker + 1, '^'))) {
+			w = TEXTW(marker) - lrpad;
+			drw_text(drw, x, 0, w, bh, 0, marker, 0);
+			statusadd(&x, w);
+			break;
+		}
+		parsestatuscode(marker + 1, close, 1, &x);
+		text = close + 1;
 	}
 
 	drw_setscheme(drw, scheme[SchemeNorm]);
@@ -1135,7 +1174,7 @@ drawbar(Monitor *m)
 	if (!m->showbar)
 		return;
 
-	if(showsystray && m == systraytomon(m) && !systrayonleft)
+	if(SYSTRAYACTIVE && m == systraytomon(m) && !systrayonleft)
 		stw = getsystraywidth();
 
 	/* draw status first so it can be overdrawn by tags later */
@@ -1349,7 +1388,7 @@ getsystraywidth()
 {
 	unsigned int w = 0;
 	Client *i;
-	if(showsystray)
+	if(SYSTRAYACTIVE)
 		for(i = systray->icons; i; w += i->w + systrayspacing, i = i->next) ;
 	return w ? w + systrayspacing : 1;
 }
@@ -1357,25 +1396,58 @@ getsystraywidth()
 pid_t
 getstatusbarpid(void)
 {
-	char buf[32], *str = buf, *c;
+	char display[128], path[PATH_MAX], buf[32];
+	const char *runtime, *value;
 	FILE *fp;
+	int n;
+	long pid;
+	size_t i;
 
-	if (statuspid > 0) {
-		snprintf(buf, sizeof(buf), "/proc/%u/cmdline", statuspid);
-		if ((fp = fopen(buf, "r"))) {
-			fgets(buf, sizeof(buf), fp);
-			while ((c = strchr(str, '/')))
-				str = c + 1;
+	if (isstatusbarpid(statuspid))
+		return statuspid;
+	runtime = getenv("XDG_RUNTIME_DIR");
+	value = getenv("DISPLAY");
+	if (runtime && *runtime && value && *value && strlen(value) < sizeof display) {
+		for (i = 0; value[i]; i++)
+			display[i] = isalnum((unsigned char)value[i]) || value[i] == '-'
+			             || value[i] == '_' || value[i] == '.' ? value[i] : '_';
+		display[i] = '\0';
+		n = snprintf(path, sizeof path, "%s/dwmblocks-%s.pid", runtime, display);
+		if (n >= 0 && n < (int)sizeof path && (fp = fopen(path, "r"))) {
+			if (fscanf(fp, "%ld", &pid) == 1 && pid > 0 && pid <= INT_MAX
+			&& isstatusbarpid((pid_t)pid)) {
+				fclose(fp);
+				return (pid_t)pid;
+			}
 			fclose(fp);
-			if (!strcmp(str, STATUSBAR))
-				return statuspid;
 		}
 	}
 	if (!(fp = popen("pidof -s "STATUSBAR, "r")))
 		return -1;
-	fgets(buf, sizeof(buf), fp);
+	if (!fgets(buf, sizeof buf, fp))
+		buf[0] = '\0';
 	pclose(fp);
 	return strtol(buf, NULL, 10);
+}
+
+int
+isstatusbarpid(pid_t pid)
+{
+	char buf[256], *name, *slash;
+	FILE *fp;
+
+	if (pid <= 0)
+		return 0;
+	snprintf(buf, sizeof buf, "/proc/%u/cmdline", (unsigned int)pid);
+	if (!(fp = fopen(buf, "r")))
+		return 0;
+	if (!fgets(buf, sizeof buf, fp))
+		buf[0] = '\0';
+	fclose(fp);
+	name = buf;
+	while ((slash = strchr(name, '/')))
+		name = slash + 1;
+	return !strcmp(name, STATUSBAR);
 }
 
 int
@@ -1819,12 +1891,13 @@ removesystrayicon(Client *i)
 {
 	Client **ii;
 
-	if (!showsystray || !i)
+	if (!SYSTRAYACTIVE || !i)
 		return;
 	for (ii = &systray->icons; *ii && *ii != i; ii = &(*ii)->next);
-	if (ii)
+	if (*ii) {
 		*ii = i->next;
-	free(i);
+		free(i);
+	}
 }
 
 void
@@ -1837,7 +1910,7 @@ resize(Client *c, int x, int y, int w, int h, int interact)
 void
 resizebarwin(Monitor *m) {
 	unsigned int w = m->ww;
-	if (showsystray && m == systraytomon(m) && !systrayonleft)
+	if (SYSTRAYACTIVE && m == systraytomon(m) && !systrayonleft)
 		w -= getsystraywidth();
 	XMoveResizeWindow(dpy, m->barwin, m->wx, m->by, w, bh);
 }
@@ -2428,7 +2501,7 @@ togglebar(const Arg *arg)
 	selmon->showbar = selmon->pertag->showbars[selmon->pertag->curtag] = !selmon->showbar;
 	updatebarpos(selmon);
 	resizebarwin(selmon);
-	if (showsystray) {
+	if (SYSTRAYACTIVE) {
 		XWindowChanges wc;
 		if (!selmon->showbar)
 			wc.y = -bh;
@@ -2598,13 +2671,13 @@ updatebars(void)
 		if (m->barwin)
 			continue;
 		w = m->ww;
-		if (showsystray && m == systraytomon(m))
+		if (SYSTRAYACTIVE && m == systraytomon(m))
 			w -= getsystraywidth();
 		m->barwin = XCreateWindow(dpy, root, m->wx, m->by, w, bh, 0, DefaultDepth(dpy, screen),
 				CopyFromParent, DefaultVisual(dpy, screen),
 				CWOverrideRedirect|CWBackPixmap|CWEventMask, &wa);
 		XDefineCursor(dpy, m->barwin, cursor[CurNormal]->cursor);
-		if (showsystray && m == systraytomon(m))
+		if (SYSTRAYACTIVE && m == systraytomon(m))
 			XMapRaised(dpy, systray->win);
 		XMapRaised(dpy, m->barwin);
 		XSetClassHint(dpy, m->barwin, &ch);
@@ -2783,23 +2856,9 @@ updatestatus(void)
 
 	if (!gettextprop(root, XA_WM_NAME, stext, sizeof(stext))) {
 		strcpy(stext, "dwm-"VERSION);
-		statusw = TEXTW(stext) - lrpad + 2;
-	} else {
-		char *text, *s, ch;
-
-		statusw  = 0;
-		for (text = s = stext; *s; s++) {
-			if ((unsigned char)(*s) < ' ') {
-				ch = *s;
-				*s = '\0';
-				statusw += statussegw(text);
-				*s = ch;
-				text = s + 1;
-			}
-		}
-		statusw += statussegw(text) + 2;
-
 	}
+	statusw = statuswidth(stext);
+	statusadd(&statusw, 2);
 	for (m = mons; m; m = m->next)
 		drawbar(m);
 	updatesystray();
@@ -2838,7 +2897,7 @@ updatesystrayiconstate(Client *i, XPropertyEvent *ev)
 	long flags;
 	int code = 0;
 
-	if (!showsystray || !i || ev->atom != xatom[XembedInfo] ||
+	if (!SYSTRAYACTIVE || !i || ev->atom != xatom[XembedInfo] ||
 			!(flags = getatomprop(i, xatom[XembedInfo])))
 		return;
 
@@ -2872,7 +2931,7 @@ updatesystray(void)
 	unsigned int sw = TEXTW(stext) - lrpad + systrayspacing;
 	unsigned int w = 1;
 
-	if (!showsystray)
+	if (!showsystray || systrayunavailable)
 		return;
 	if (systrayonleft)
 		x -= sw + lrpad / 2;
@@ -2899,8 +2958,10 @@ updatesystray(void)
 		}
 		else {
 			fprintf(stderr, "dwm: unable to obtain system tray.\n");
+			XDestroyWindow(dpy, systray->win);
 			free(systray);
 			systray = NULL;
+			systrayunavailable = 1;
 			return;
 		}
 	}
@@ -3174,7 +3235,7 @@ Client *
 wintosystrayicon(Window w) {
 	Client *i = NULL;
 
-	if (!showsystray || !w)
+	if (!SYSTRAYACTIVE || !w)
 		return i;
 	for (i = systray->icons; i && i->win != w; i = i->next) ;
 	return i;

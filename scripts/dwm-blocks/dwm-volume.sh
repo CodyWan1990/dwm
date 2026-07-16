@@ -5,22 +5,28 @@
   || . "$HOME/.config/suckless/scripts/colorschemes/monokai.sh"
 
 if command -v wpctl >/dev/null 2>&1; then
-    VOL=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | awk '{print int($2*100)}')
-    MUTED=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null | grep -c MUTED)
+    state=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null) || state=
+    volume=$(printf '%s\n' "$state" | awk '{print int($2 * 100)}')
+    case "$state" in *MUTED*) muted=1 ;; *) muted=0 ;; esac
 elif command -v pactl >/dev/null 2>&1; then
-    VOL=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | grep -Po '\d+(?=%)' | head -1)
-    MUTED=$(pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null | grep -c yes)
+    volume=$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null |
+        awk 'match($0, /[0-9]+%/) { value = substr($0, RSTART, RLENGTH - 1); print value; exit }')
+    case $(pactl get-sink-mute @DEFAULT_SINK@ 2>/dev/null) in
+        *yes) muted=1 ;;
+        *) muted=0 ;;
+    esac
 else
     printf "^c#%s^🔇 N/A^d^" "$COMMENT"
     exit 0
 fi
 
-if [ "$MUTED" -eq 1 ] || [ -z "$VOL" ]; then
+case "$volume" in *[!0-9]*|'') volume= ;; esac
+if [ "$muted" -eq 1 ] || [ -z "$volume" ]; then
     printf "^c#%s^🔇 MUTE^d^" "$COMMENT"
-elif [ "$VOL" -gt 100 ]; then
-    printf "^c#%s^🔊 %s%%^d^" "$RED" "$VOL"
-elif [ "$VOL" -gt 50 ]; then
-    printf "^c#%s^🔊 %s%%^d^" "$MAUVE" "$VOL"
+elif [ "$volume" -gt 100 ]; then
+    printf "^c#%s^🔊 %s%%^d^" "$RED" "$volume"
+elif [ "$volume" -gt 50 ]; then
+    printf "^c#%s^🔊 %s%%^d^" "$MAUVE" "$volume"
 else
-    printf "^c#%s^🔉 %s%%^d^" "$MAUVE" "$VOL"
+    printf "^c#%s^🔉 %s%%^d^" "$MAUVE" "$volume"
 fi

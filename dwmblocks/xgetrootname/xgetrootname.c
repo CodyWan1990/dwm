@@ -4,7 +4,7 @@
 int
 main(void)
 {
-        char *name;
+	char *name = NULL;
         Display *dpy;
 
         if (!(dpy = XOpenDisplay(NULL))) {
@@ -15,7 +15,8 @@ main(void)
                 puts(name);
         else
                 fputs("No name has been set for the root window.\n", stderr);
-        XFree(name);
+	if (name)
+		XFree(name);
         XCloseDisplay(dpy);
         return 0;
 }

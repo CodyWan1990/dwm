@@ -60,7 +60,7 @@ xorg-server xorg-xinit xorg-xrandr xorg-xset xorg-xsetroot
 xorg-xprop xorg-xkill
 xdotool xclip xdg-utils maim
 sxhkd polkit-gnome feh nitrogen dunst libnotify
-curl jq pacman-contrib lm_sensors libpulse wireplumber
+curl jq pacman-contrib lm_sensors libpulse wireplumber pavucontrol
 j4-dmenu-desktop perl
 fish
 "
@@ -75,12 +75,12 @@ libxcb-randr0-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
 libxcb-dpms0-dev libxcb-sync-dev
 x11proto-dev libdrm-dev
 libfreetype-dev libfontconfig-dev libpixman-1-dev libgl1-mesa-dev libegl1-mesa-dev
-libpcre2-dev libev-dev libconfig-dev libdbus-1-dev uthash-dev libspdlog-dev libfmt-dev
+libpcre2-dev libev-dev libconfig-dev libdbus-1-dev dbus uthash-dev libspdlog-dev libfmt-dev
 libimlib2-dev libharfbuzz-dev zlib1g-dev
 xserver-xorg xinit x11-xserver-utils x11-utils
 xdotool xclip xsel xdg-utils maim
 sxhkd mate-polkit feh nitrogen dunst libnotify-bin
-curl jq lm-sensors pulseaudio-utils wireplumber
+curl jq lm-sensors pulseaudio-utils wireplumber pavucontrol
 j4-dmenu-desktop perl
 fish
 "
@@ -97,12 +97,12 @@ libXrandr-devel libXxf86vm-devel libxcb-devel
 xcb-util-devel xcb-util-renderutil-devel xcb-util-image-devel
 xorg-x11-proto-devel libdrm-devel
 freetype-devel fontconfig-devel pixman-devel mesa-libGL-devel mesa-libEGL-devel
-pcre2-devel libev-devel libconfig-devel dbus-devel uthash-devel
+pcre2-devel libev-devel libconfig-devel dbus-devel dbus-tools uthash-devel
 spdlog-devel fmt-devel imlib2-devel harfbuzz-devel zlib-ng-compat-devel
 xorg-x11-server-Xorg xorg-x11-xinit xrandr xset xsetroot xprop xkill
 xdotool xclip xsel xdg-utils maim
 sxhkd mate-polkit feh nitrogen dunst libnotify
-curl jq lm_sensors pulseaudio-utils wireplumber
+curl jq lm_sensors pulseaudio-utils wireplumber pavucontrol
 j4-dmenu-desktop perl
 fish
 "

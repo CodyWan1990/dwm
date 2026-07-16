@@ -1,323 +1,441 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 #include <X11/Xlib.h>
 
+#include "runtime.h"
+
 #define NILL                            INT_MIN
-#define LOCKFILE                        "/var/local/dwmblocks/dwmblocks.pid"
-
 #define LENGTH(X)                       (sizeof X / sizeof X[0])
-
 #define DELIMITERLENGTH                 (sizeof delimiter)
-#define STATUSLENGTH                    (LENGTH(blocks) * (CMDOUTLENGTH + DELIMITERLENGTH) + 1)
+#define STATUSLENGTH                    (LENGTH(blocks) * (CMDOUTLENGTH + DELIMITERLENGTH + 1))
+#define NS                              1000000000LL
 
 #include "config.h"
 
-_Static_assert(INTERVALs >= 0, "INTERVALs must be greater than or equal to 0");
-_Static_assert(INTERVALn >= 0 && INTERVALn <= 999999999, "INTERVALn must be between 0 and 999999999");
+_Static_assert(INTERVALs >= 0, "INTERVALs must be non-negative");
+_Static_assert(INTERVALn >= 0 && INTERVALn < NS, "INTERVALn must be less than one second");
+_Static_assert(INTERVALs > 0 || INTERVALn > 0, "the interval must be greater than zero");
+_Static_assert(BLOCKTIMEOUTs > 0, "BLOCKTIMEOUTs must be greater than zero");
 
-static void buttonhandler(int sig, siginfo_t *info, void *ucontext);
 static void cleanup(void);
-static void setupsignals(void);
-static void sighandler(int sig, siginfo_t *si, void *ucontext);
+static int configure(void);
+static void handleclick(int value);
+static long long monotonicns(void);
+static void reapchildren(void);
+static int runblock(Block *block, int sigval, char *output, size_t *length);
+static void runintervals(long long *nexttick, unsigned long long *tick, long long interval);
+static void setblockfailed(Block *block, const char *reason);
 static void statusloop(void);
-static void termhandler(int sig);
 static void updateblock(Block *block, int sigval);
 static void updatestatus(void);
-static void writepid(void);
+static int writepid(void);
 
 static Block *dirtyblock;
 static Display *dpy;
+static int lockfd = -1;
+static int lockowned;
+static char lockpath[PATH_MAX];
 static sigset_t blocksigmask;
-
-void
-buttonhandler(int sig, siginfo_t *info, void *ucontext)
-{
-        sig = info->si_value.sival_int >> 8;
-        for (Block *block = blocks; block->pathu; block++)
-                if (block->signal == sig)
-                        switch (fork()) {
-                                case -1:
-                                        perror("buttonhandler - fork");
-                                        break;
-                                case 0:
-                                {
-                                        char button[] = { '0' + (info->si_value.sival_int & 0xff), '\0' };
-                                        char *arg[] = { block->pathc, button, NULL };
-
-                                        setsid();
-                                        execv(arg[0], arg);
-                                        perror("buttonhandler - child - execv");
-                                        _exit(127);
-                                }
-                        }
-}
 
 void
 cleanup(void)
 {
-        unlink(LOCKFILE);
-        XStoreName(dpy, DefaultRootWindow(dpy), "");
-        XCloseDisplay(dpy);
+	if (dpy) {
+		XStoreName(dpy, DefaultRootWindow(dpy), "");
+		XCloseDisplay(dpy);
+		dpy = NULL;
+	}
+	if (lockfd != -1) {
+		if (lockowned)
+			unlink(lockpath);
+		close(lockfd);
+		lockfd = -1;
+		lockowned = 0;
+	}
+}
+
+int
+configure(void)
+{
+	Block *block, *other;
+
+	sigemptyset(&blocksigmask);
+	sigaddset(&blocksigmask, SIGHUP);
+	sigaddset(&blocksigmask, SIGINT);
+	sigaddset(&blocksigmask, SIGTERM);
+	for (int sig = SIGRTMIN; sig <= SIGRTMAX; sig++)
+		sigaddset(&blocksigmask, sig);
+	for (block = blocks; block->pathu; block++) {
+		if (block->interval < -1 || block->signal < 0
+		|| block->signal > SIGRTMAX - SIGRTMIN
+		|| (block->pathc && (block->signal == 0 || block->signal >= DELIMITERENDCHAR))) {
+			fprintf(stderr, "dwmblocks: invalid configuration for %s\n", block->pathu);
+			return -1;
+		}
+		for (other = blocks; other < block; other++)
+			if (block->signal > 0 && block->signal == other->signal) {
+				fprintf(stderr, "dwmblocks: duplicate signal %d\n", block->signal);
+				return -1;
+			}
+	}
+	if (sigprocmask(SIG_BLOCK, &blocksigmask, NULL) == -1) {
+		perror("dwmblocks: sigprocmask");
+		return -1;
+	}
+	return 0;
 }
 
 void
-setupsignals(void)
+handleclick(int value)
 {
-        struct sigaction sa;
+	char button[12];
+	Block *block;
+	pid_t pid;
+	int signal = value >> 8;
+	int number = value & 0xff;
+	sigset_t empty;
 
-        /* populate blocksigmask and check validity of signals */
-        sigemptyset(&blocksigmask);
-        sigaddset(&blocksigmask, SIGHUP);
-        sigaddset(&blocksigmask, SIGINT);
-        sigaddset(&blocksigmask, SIGTERM);
-        for (Block *block = blocks; block->pathu; block++) {
-                if (block->signal <= 0)
-                        continue;
-                if (block->signal > SIGRTMAX - SIGRTMIN) {
-                        fprintf(stderr, "Error: SIGRTMIN + %d exceeds SIGRTMAX.\n", block->signal);
-                        unlink(LOCKFILE);
-                        XCloseDisplay(dpy);
-                        exit(2);
-                }
-                sigaddset(&blocksigmask, SIGRTMIN + block->signal);
-        }
+	if (number < 1 || number > 9)
+		return;
+	for (block = blocks; block->pathu; block++)
+		if (block->signal == signal && block->pathc)
+			break;
+	if (!block->pathu)
+		return;
+	if ((pid = fork()) == -1) {
+		perror("dwmblocks: click fork");
+		return;
+	}
+	if (pid == 0) {
+		sigemptyset(&empty);
+		sigprocmask(SIG_SETMASK, &empty, NULL);
+		setsid();
+		snprintf(button, sizeof button, "%d", number);
+		execl(block->pathc, block->pathc, button, (char *)NULL);
+		perror("dwmblocks: click exec");
+		_exit(127);
+	}
+}
 
-        /* setup signal handlers */
-        /* to handle HUP, INT and TERM */
-        sa.sa_flags = SA_RESTART;
-        sigemptyset(&sa.sa_mask);
-        sa.sa_handler = termhandler;
-        sigaction(SIGHUP, &sa, NULL);
-        sigaction(SIGINT, &sa, NULL);
-        sigaction(SIGTERM, &sa, NULL);
+long long
+monotonicns(void)
+{
+	struct timespec now;
 
-        /* to ignore unused realtime signals */
-        // sa.sa_flags = SA_RESTART;
-        // sigemptyset(&sa.sa_mask);
-        sa.sa_handler = SIG_IGN;
-        for (int i = SIGRTMIN + 1; i <= SIGRTMAX; i++)
-                sigaction(i, &sa, NULL);
-
-        /* to prevent forked children from becoming zombies */
-        sa.sa_flags = SA_NOCLDSTOP | SA_NOCLDWAIT | SA_RESTART;
-        // sigemptyset(&sa.sa_mask);
-        sa.sa_handler = SIG_IGN;
-        sigaction(SIGCHLD, &sa, NULL);
-
-        /* to handle signals generated by dwm on click events */
-        sa.sa_flags = SA_RESTART | SA_SIGINFO;
-        // sigemptyset(&sa.sa_mask);
-        sa.sa_sigaction = buttonhandler;
-        sigaction(SIGRTMIN, &sa, NULL);
-
-        /* to handle update signals for individual blocks */
-        sa.sa_flags = SA_NODEFER | SA_RESTART | SA_SIGINFO;
-        sa.sa_mask = blocksigmask;
-        sa.sa_sigaction = sighandler;
-        for (Block *block = blocks; block->pathu; block++)
-                if (block->signal > 0)
-                        sigaction(SIGRTMIN + block->signal, &sa, NULL);
+	if (clock_gettime(CLOCK_MONOTONIC, &now) == -1) {
+		perror("dwmblocks: clock_gettime");
+		exit(1);
+	}
+	return now.tv_sec * NS + now.tv_nsec;
 }
 
 void
-sighandler(int sig, siginfo_t *info, void *ucontext)
+reapchildren(void)
 {
-        sig -= SIGRTMIN;
-        for (Block *block = blocks; block->pathu; block++)
-                if (block->signal == sig)
-                        updateblock(block, info->si_value.sival_int);
-        updatestatus();
+	while (waitpid(-1, NULL, WNOHANG) > 0);
+}
+
+int
+runblock(Block *block, int sigval, char *output, size_t *length)
+{
+	char discard[256] = {0};
+	int fd[2], status = 0, timedout = 0, childdone = 0, pipeopen = 1;
+	long long deadline = monotonicns() + (long long)BLOCKTIMEOUTs * NS;
+	pid_t pid;
+	sigset_t empty;
+	size_t used = 0;
+
+	if (pipe(fd) == -1) {
+		perror("dwmblocks: pipe");
+		return -1;
+	}
+	if ((pid = fork()) == -1) {
+		perror("dwmblocks: fork");
+		close(fd[0]);
+		close(fd[1]);
+		return -1;
+	}
+	if (pid == 0) {
+		char value[32];
+
+		setpgid(0, 0);
+		sigemptyset(&empty);
+		sigprocmask(SIG_SETMASK, &empty, NULL);
+		close(fd[0]);
+		if (fd[1] != STDOUT_FILENO) {
+			if (dup2(fd[1], STDOUT_FILENO) == -1)
+				_exit(126);
+			close(fd[1]);
+		}
+		if (sigval == NILL)
+			execl(block->pathu, block->pathu, (char *)NULL);
+		snprintf(value, sizeof value, "%d", sigval);
+		execl(block->pathu, block->pathu, value, (char *)NULL);
+		perror("dwmblocks: block exec");
+		_exit(127);
+	}
+	close(fd[1]);
+	if (setpgid(pid, pid) == -1 && errno != EACCES && errno != ESRCH)
+		perror("dwmblocks: setpgid");
+	while (!childdone || pipeopen) {
+		long long remaining = deadline - monotonicns();
+		struct pollfd pfd = { .fd = fd[0], .events = POLLIN | POLLHUP };
+		int timeout, ready;
+
+		if (remaining <= 0) {
+			timedout = 1;
+			break;
+		}
+		timeout = remaining / 1000000 > 50 ? 50 : (int)((remaining + 999999) / 1000000);
+		ready = pipeopen ? poll(&pfd, 1, timeout) : poll(NULL, 0, timeout);
+		if (ready == -1 && errno != EINTR) {
+			perror("dwmblocks: poll");
+			break;
+		}
+		if (ready > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
+			ssize_t n;
+			char *dest = used < CMDOUTLENGTH ? output + used : discard;
+			size_t available = used < CMDOUTLENGTH ? CMDOUTLENGTH - used : sizeof discard;
+
+			n = read(fd[0], dest, available);
+			if (n > 0 && used < CMDOUTLENGTH)
+				used += (size_t)n;
+			else if (n == 0) {
+				close(fd[0]);
+				pipeopen = 0;
+			} else if (n < 0 && errno != EINTR && errno != EAGAIN) {
+				perror("dwmblocks: read");
+				break;
+			}
+		}
+		if (!childdone) {
+			pid_t waited = waitpid(pid, &status, WNOHANG);
+			if (waited == pid)
+				childdone = 1;
+			else if (waited == -1 && errno != EINTR) {
+				perror("dwmblocks: waitpid");
+				break;
+			}
+		}
+	}
+	if (pipeopen)
+		close(fd[0]);
+	if (timedout)
+		kill(-pid, SIGKILL);
+	if (!childdone) {
+		kill(-pid, SIGKILL);
+		kill(pid, SIGKILL);
+		while (waitpid(pid, &status, 0) == -1 && errno == EINTR);
+	}
+	if (timedout)
+		return 1;
+	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+		return 2;
+	output[used] = '\0';
+	*length = used;
+	return 0;
 }
 
 void
-statusloop(void)
+runintervals(long long *nexttick, unsigned long long *tick, long long interval)
 {
-        int i;
-        struct timespec t;
+	unsigned long long elapsed, previous;
+	long long now = monotonicns();
+	Block *block;
 
-        sigprocmask(SIG_BLOCK, &blocksigmask, NULL);
-        for (Block *block = blocks; block->pathu; block++)
-                if (block->interval >= 0)
-                        updateblock(block, NILL);
-        for (i = 1; ; i++) {
-                updatestatus();
-                sigprocmask(SIG_UNBLOCK, &blocksigmask, NULL);
-                t.tv_sec = INTERVALs, t.tv_nsec = INTERVALn;
-                while (nanosleep(&t, &t) == -1);
-                sigprocmask(SIG_BLOCK, &blocksigmask, NULL);
-                for (Block *block = blocks; block->pathu; block++)
-                        if (block->interval > 0 && i % block->interval == 0)
-                                updateblock(block, NILL);
-        }
+	if (now < *nexttick)
+		return;
+	elapsed = (unsigned long long)((now - *nexttick) / interval) + 1;
+	previous = *tick;
+	*tick += elapsed;
+	*nexttick += (long long)elapsed * interval;
+	for (block = blocks; block->pathu; block++)
+		if (block->interval > 0
+		&& previous / (unsigned int)block->interval != *tick / (unsigned int)block->interval)
+			updateblock(block, NILL);
+	updatestatus();
 }
 
 void
-termhandler(int sig)
+setblockfailed(Block *block, const char *reason)
 {
-        cleanup();
-        exit(0);
+	if (!block->failed)
+		fprintf(stderr, "dwmblocks: %s: %s\n", block->pathu, reason);
+	block->failed = 1;
 }
 
 void
 updateblock(Block *block, int sigval)
 {
-        int fd[2];
+	char output[CMDOUTLENGTH + 1], text[CMDOUTLENGTH + 1 + DELIMITERLENGTH] = {0};
+	size_t length, newlength = 0;
+	int result;
 
-        if (pipe(fd) == -1) {
-                perror("updateblock - pipe");
-                cleanup();
-                exit(1);
-        }
-        switch (fork()) {
-                case -1:
-                        perror("updateblock - fork");
-                        close(fd[0]);
-                        close(fd[1]);
-                        cleanup();
-                        exit(1);
-                case 0:
-                        close(fd[0]);
-                        if (fd[1] != STDOUT_FILENO) {
-                                if (dup2(fd[1], STDOUT_FILENO) != STDOUT_FILENO) {
-                                        perror("updateblock - child - dup2");
-                                        close(fd[1]);
-                                        exit(1);
-                                }
-                                close(fd[1]);
-                        }
-                        if (sigval == NILL) {
-                                char *arg[] = { block->pathu, NULL };
-
-                                execv(arg[0], arg);
-                        } else {
-                                char buf[12];
-                                char *arg[] = { block->pathu, buf, NULL };
-
-                                snprintf(buf, sizeof buf, "%d", sigval);
-                                execv(arg[0], arg);
-                        }
-                        perror("updateblock - child - execv");
-                        _exit(127);
-                default:
-                {
-                        size_t trd = 0;
-                        ssize_t rd;
-
-                        close(fd[1]);
-                        do
-                                rd = read(fd[0], block->curtext + trd, CMDOUTLENGTH - trd);
-                        while (rd > 0 && (trd += rd) < CMDOUTLENGTH);
-                        if (rd == -1) {
-                                perror("updateblock - read");
-                                close(fd[0]);
-                                cleanup();
-                                exit(1);
-                        }
-                        close(fd[0]);
-
-                        block->curtext[trd] = '\0';
-                        if (memcmp(block->curtext, block->prvtext, trd + 1) != 0) {
-                                memcpy(block->prvtext, block->curtext, trd + 1);
-                                if (!dirtyblock || block < dirtyblock)
-                                        dirtyblock = block;
-                        }
-                        if (trd == 0)
-                                block->length = 0;
-                        else {
-                                if (block->curtext[trd - 1] == '\n')
-                                        trd--;
-                                if (block->pathc) {
-                                        memmove(block->curtext + 1, block->curtext, trd);
-                                        block->curtext[0] = block->signal;
-                                        trd++;
-                                }
-                                memcpy(block->curtext + trd, delimiter, DELIMITERLENGTH);
-                                block->length = trd + DELIMITERLENGTH;
-                        }
-                }
-        }
+	result = runblock(block, sigval, output, &length);
+	if (result != 0) {
+		setblockfailed(block, result == 1 ? "timed out" : "command failed");
+		return;
+	}
+	if (block->failed)
+		fprintf(stderr, "dwmblocks: %s: recovered\n", block->pathu);
+	block->failed = 0;
+	if (length && output[length - 1] == '\n')
+		length--;
+	if (length) {
+		if (block->pathc)
+			text[newlength++] = (char)block->signal;
+		memcpy(text + newlength, output, length);
+		newlength += length;
+		memcpy(text + newlength, delimiter, DELIMITERLENGTH);
+		newlength += DELIMITERLENGTH;
+	}
+	if (newlength != block->length || memcmp(text, block->curtext, newlength)) {
+		memcpy(block->curtext, text, newlength);
+		block->length = newlength;
+		if (!dirtyblock || block < dirtyblock)
+			dirtyblock = block;
+	}
 }
 
 void
 updatestatus(void)
 {
-        static char statustext[STATUSLENGTH];
-        char *s = statustext;
-        Block *block;
+	static char statustext[STATUSLENGTH];
+	char *s = statustext;
+	Block *block;
 
-        if (!dirtyblock)
-                return;
-        for (block = blocks; block < dirtyblock; block++)
-                s += block->length;
-        for (; block->pathu; block++) {
-                memcpy(s, block->curtext, block->length);
-                s += block->length;
-        }
-        s[s == statustext ? 0 : -DELIMITERLENGTH] = '\0';
-        dirtyblock = NULL;
-
-        XStoreName(dpy, DefaultRootWindow(dpy), statustext);
-        XSync(dpy, False);
+	if (!dirtyblock)
+		return;
+	for (block = blocks; block < dirtyblock; block++)
+		s += block->length;
+	for (; block->pathu; block++) {
+		memcpy(s, block->curtext, block->length);
+		s += block->length;
+	}
+	s[s == statustext ? 0 : -(int)DELIMITERLENGTH] = '\0';
+	dirtyblock = NULL;
+	XStoreName(dpy, DefaultRootWindow(dpy), statustext);
+	XSync(dpy, False);
 }
 
 void
-writepid(void)
+statusloop(void)
 {
-        int fd;
-        struct flock fl;
+	const long long interval = (long long)INTERVALs * NS + INTERVALn;
+	long long nexttick = monotonicns() + interval;
+	unsigned long long tick = 0;
+	Block *block;
 
-        if ((fd = open(LOCKFILE, O_RDWR | O_CREAT | O_CLOEXEC,
-                       S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)) == -1) {
-                perror("writepid - open");
-                exit(1);
-        }
-        fl.l_type = F_WRLCK;
-        fl.l_whence = SEEK_SET;
-        fl.l_start = 0;
-        fl.l_len = 0;
-        if (fcntl(fd, F_SETLK, &fl) == -1) {
-                if (errno == EACCES || errno == EAGAIN) {
-                        fputs("Error: another instance of dwmblocks is already running.\n", stderr);
-                        exit(2);
-                }
-                perror("writepid - fcntl");
-                close(fd);
-                exit(1);
-        }
-        if (ftruncate(fd, 0) == -1) {
-                perror("writepid - ftruncate");
-                close(fd);
-                exit(1);
-        }
-        if (dprintf(fd, "%ld", (long)getpid()) < 0) {
-                perror("writepid - dprintf");
-                close(fd);
-                exit(1);
-        }
+	for (block = blocks; block->pathu; block++)
+		if (block->interval >= 0)
+			updateblock(block, NILL);
+	if (!dirtyblock)
+		dirtyblock = blocks;
+	updatestatus();
+	for (;;) {
+		struct timespec timeout;
+		siginfo_t info;
+		long long remaining;
+		int sig;
+
+		runintervals(&nexttick, &tick, interval);
+		remaining = nexttick - monotonicns();
+		if (remaining < 0)
+			remaining = 0;
+		timeout.tv_sec = remaining / NS;
+		timeout.tv_nsec = remaining % NS;
+		reapchildren();
+		sig = sigtimedwait(&blocksigmask, &info, &timeout);
+		if (sig == SIGHUP || sig == SIGINT || sig == SIGTERM)
+			return;
+		if (sig == SIGRTMIN) {
+			handleclick(info.si_value.sival_int);
+			continue;
+		}
+		if (sig > SIGRTMIN) {
+			for (block = blocks; block->pathu; block++)
+				if (block->signal == sig - SIGRTMIN) {
+					updateblock(block, info.si_value.sival_int);
+					break;
+				}
+			updatestatus();
+			continue;
+		}
+		if (sig == -1 && errno != EAGAIN && errno != EINTR) {
+			perror("dwmblocks: sigtimedwait");
+			return;
+		}
+		if (sig == -1 && (errno == EINTR || errno == EAGAIN))
+			continue;
+	}
 }
 
 int
-main(int argc, char *argv[])
+writepid(void)
 {
-        int xfd;
+	struct flock fl = { .l_type = F_WRLCK, .l_whence = SEEK_SET };
+	struct stat st;
 
-        writepid();
-        if (!(dpy = XOpenDisplay(NULL))) {
-                fputs("Error: could not open display.\n", stderr);
-                unlink(LOCKFILE);
-                return 1;
-        }
-        xfd = ConnectionNumber(dpy);
-        fcntl(xfd, F_SETFD, fcntl(xfd, F_GETFD) | FD_CLOEXEC);
-        setupsignals();
-        statusloop();
-        cleanup();
-        return 0;
+	if (getlockpath(lockpath, sizeof lockpath) == -1) {
+		perror("dwmblocks: runtime path");
+		return -1;
+	}
+	lockfd = open(lockpath, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+	if (lockfd == -1) {
+		perror("dwmblocks: lock open");
+		return -1;
+	}
+	if (fstat(lockfd, &st) == -1 || !S_ISREG(st.st_mode) || st.st_uid != getuid()
+	|| st.st_nlink != 1) {
+		fputs("dwmblocks: unsafe lock file\n", stderr);
+		return -1;
+	}
+	if (fcntl(lockfd, F_SETLK, &fl) == -1) {
+		if (errno == EACCES || errno == EAGAIN)
+			fputs("dwmblocks: another instance is already running on this display\n", stderr);
+		else
+			perror("dwmblocks: lock");
+		return -1;
+	}
+	lockowned = 1;
+	if (fchmod(lockfd, 0600) == -1 || ftruncate(lockfd, 0) == -1
+	|| dprintf(lockfd, "%ld\n", (long)getpid()) < 0) {
+		perror("dwmblocks: lock write");
+		return -1;
+	}
+	return 0;
+}
+
+int
+main(void)
+{
+	int xfd, status = 1;
+
+	if (configure() == -1 || writepid() == -1)
+		goto done;
+	if (!(dpy = XOpenDisplay(NULL))) {
+		fputs("dwmblocks: could not open display\n", stderr);
+		goto done;
+	}
+	xfd = ConnectionNumber(dpy);
+	if (fcntl(xfd, F_SETFD, fcntl(xfd, F_GETFD) | FD_CLOEXEC) == -1) {
+		perror("dwmblocks: display cloexec");
+		goto done;
+	}
+	statusloop();
+	status = 0;
+done:
+	cleanup();
+	return status;
 }

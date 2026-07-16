@@ -10,14 +10,12 @@ paused=$(dunstctl is-paused 2>/dev/null) || {
 }
 
 history=$(dunstctl count history 2>/dev/null) || history=0
-displayed=$(dunstctl count displayed 2>/dev/null) || displayed=0
 waiting=$(dunstctl count waiting 2>/dev/null) || waiting=0
 
 case "$history" in *[!0-9]*|'') history=0 ;; esac
-case "$displayed" in *[!0-9]*|'') displayed=0 ;; esac
 case "$waiting" in *[!0-9]*|'') waiting=0 ;; esac
 
-count=$((history + displayed + waiting))
+count=$((history + waiting))
 if [ "$count" -gt 0 ]; then
     label=" $count"
 else

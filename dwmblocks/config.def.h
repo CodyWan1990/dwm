@@ -22,6 +22,7 @@ static const char delimiter[] = { ' ', '|', ' ', DELIMITERENDCHAR };
 /* Interval unit: 1 interval = INTERVALs seconds + INTERVALn nanoseconds */
 #define INTERVALs                       1
 #define INTERVALn                       0
+#define BLOCKTIMEOUTs                   2
 
 /* pathu   - path to script that outputs status text
  * pathc   - path to click handler script (NULL if not clickable)
@@ -33,9 +34,9 @@ static Block blocks[] = {
 /*      pathu                       pathc                               interval  signal */
         { PATH("dwm-battery.sh"),   NULL,                               30,       1 },
         { PATH("dwm-memory.sh"),    NULL,                               5,        2 },
-        { PATH("dwm-volume.sh"),    CLICK("dwm-volume-click.sh"),       0,        3 },
+        { PATH("dwm-volume.sh"),    CLICK("dwm-volume-click.sh"),       30,       3 },
         { PATH("dwm-clock.sh"),     NULL,                               30,       4 },
-        { PATH("dwm-notifications.sh"), CLICK("dwm-notifications-click.sh"), 2,  6 },
+        { PATH("dwm-notifications.sh"), CLICK("dwm-notifications-click.sh"), 30, 6 },
         { PATH("dwm-powermenu.sh"), CLICK("dwm-powermenu-click.sh"),    0,        5 },
         { NULL }
 };

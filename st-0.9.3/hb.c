@@ -38,12 +38,13 @@ static RuneBuffer hbrunebuffer = { 0, NULL };
  * e. g.
  * FEATURE('c', 'a', 'l', 't'), FEATURE('d', 'l', 'i', 'g')
  */
-hb_feature_t features[] = { };
+static hb_feature_t *features;
+static const unsigned int features_len = 0;
 
 void
 hbunloadfonts()
 {
-	for (int i = 0; i < hbfontcache.capacity; i++) {
+	for (size_t i = 0; i < hbfontcache.capacity; i++) {
 		hb_font_destroy(hbfontcache.fonts[i].font);
 		XftUnlockFace(hbfontcache.fonts[i].match);
 	}
@@ -58,13 +59,15 @@ hbunloadfonts()
 hb_font_t *
 hbfindfont(XftFont *match)
 {
-	for (int i = 0; i < hbfontcache.capacity; i++) {
+	for (size_t i = 0; i < hbfontcache.capacity; i++) {
 		if (hbfontcache.fonts[i].match == match)
 			return hbfontcache.fonts[i].font;
 	}
 
 	/* Font not found in cache, caching it now. */
-	hbfontcache.fonts = realloc(hbfontcache.fonts, sizeof(HbFontMatch) * (hbfontcache.capacity + 1));
+	hbfontcache.fonts = xrealloc(hbfontcache.fonts,
+				      sizeof(HbFontMatch) *
+				      (hbfontcache.capacity + 1));
 	FT_Face face = XftLockFace(match);
 	hb_font_t *font = hb_ft_font_create(face, NULL);
 	if (font == NULL)
@@ -87,13 +90,16 @@ void hbtransform(HbTransformData *data, XftFont *xfont, const Glyph *glyphs, int
 		return;
 
 	hb_buffer_t *buffer = hb_buffer_create();
+	if (!buffer)
+		die("Failed to allocate Harfbuzz buffer.\n");
 	hb_buffer_set_direction(buffer, HB_DIRECTION_LTR);
 	hb_buffer_set_cluster_level(buffer, HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS);
 
 	/* Resize the buffer if required length is larger. */
-	if (hbrunebuffer.capacity < length) {
+	if (hbrunebuffer.capacity < (size_t)length) {
 		hbrunebuffer.capacity = (length / BUFFER_STEP + 1) * BUFFER_STEP;
-		hbrunebuffer.runes = realloc(hbrunebuffer.runes, hbrunebuffer.capacity * sizeof(Rune));
+		hbrunebuffer.runes = xrealloc(hbrunebuffer.runes,
+					      hbrunebuffer.capacity * sizeof(Rune));
 	}
 
 	/* Fill buffer with codepoints. */
@@ -106,7 +112,7 @@ void hbtransform(HbTransformData *data, XftFont *xfont, const Glyph *glyphs, int
 	hb_buffer_add_codepoints(buffer, hbrunebuffer.runes, length, 0, length);
 
 	/* Shape the segment. */
-	hb_shape(font, buffer, features, sizeof(features)/sizeof(hb_feature_t));
+	hb_shape(font, buffer, features, features_len);
 
 	/* Get new glyph info. */
 	hb_glyph_info_t *info = hb_buffer_get_glyph_infos(buffer, &glyph_count);

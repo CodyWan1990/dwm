@@ -683,6 +683,9 @@ xcb_pixmap_t x_create_pixmap(struct x_connection *c, uint8_t depth, int width, i
 	}
 
 	log_error_x_error(err, "Failed to create pixmap");
+#ifdef DEBUG_XRC
+	xrc_delete_xid(pix);
+#endif
 	free(err);
 	return XCB_NONE;
 }

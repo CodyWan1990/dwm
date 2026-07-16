@@ -26,8 +26,9 @@ LIBS = -L$(X11LIB) -lm -lrt -lX11 -lutil -lXft -lXrender \
        `$(PKG_CONFIG) --libs harfbuzz`
 
 # flags
+WARNFLAGS = -Wall -Wextra -Wformat=2
 STCPPFLAGS = -DVERSION=\"$(VERSION)\" -D_XOPEN_SOURCE=600
-STCFLAGS = $(INCS) $(STCPPFLAGS) $(CPPFLAGS) $(CFLAGS)
+STCFLAGS = $(INCS) $(STCPPFLAGS) $(WARNFLAGS) $(CPPFLAGS) $(CFLAGS)
 STLDFLAGS = $(LIBS) $(LDFLAGS)
 
 # OpenBSD:

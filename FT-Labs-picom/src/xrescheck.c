@@ -3,6 +3,7 @@
 
 #include "compiler.h"
 #include "log.h"
+#include "utils.h"
 
 #include "xrescheck.h"
 
@@ -48,9 +49,10 @@ void xrc_delete_xid_(XID xid, M_POS_DATA_PARAMS) {
  * @brief Report about issues found in the XID allocation table.
  */
 void xrc_report_xid(void) {
-	for (xrc_xid_record_t *prec = gs_xid_records; prec; prec = prec->hh.next)
+	for (xrc_xid_record_t *prec = gs_xid_records; prec; prec = prec->hh.next) {
 		log_trace("XRC: %s:%d %s(): %#010lx (%s) not freed.\n", prec->file,
 		          prec->line, prec->func, prec->xid, prec->type);
+	}
 }
 
 /**

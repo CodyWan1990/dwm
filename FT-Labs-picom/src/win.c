@@ -335,6 +335,9 @@ static inline bool win_bind_pixmap(struct backend_base *b, struct managed_win *w
 	if (e) {
 		log_error("Failed to get named pixmap for window %#010x(%s)", w->base.id,
 		          w->name);
+#ifdef DEBUG_XRC
+		xrc_delete_xid(pixmap);
+#endif
 		free(e);
 		return false;
 	}
@@ -3212,5 +3215,5 @@ win_stack_find_next_managed(const session_t *ps, const struct list_node *w) {
 /// Return whether this window is mapped on the X server side
 bool win_is_mapped_in_x(const struct managed_win *w) {
 	return w->state == WSTATE_MAPPING || w->state == WSTATE_FADING ||
-	       w->state == WSTATE_MAPPED || w->state == WSTATE_DESTROYING || (w->flags & WIN_FLAGS_MAPPED);
+	       w->state == WSTATE_MAPPED || (w->flags & WIN_FLAGS_MAPPED);
 }

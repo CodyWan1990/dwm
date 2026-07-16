@@ -5,9 +5,6 @@
 
 /// Initialize the graphics module.
 void gr_init(Display *disp, Visual *vis, Colormap cm);
-/// Deinitialize the graphics module.
-void gr_deinit();
-
 /// Add an image rectangle to a list if rectangles to draw. This function may
 /// actually draw some rectangles, or it may wait till more rectangles are
 /// appended. Must be called between `gr_start_drawing` and `gr_finish_drawing`.

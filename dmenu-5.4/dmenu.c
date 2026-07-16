@@ -94,10 +94,8 @@ parse_hpitems(char *src)
 	char *t;
 
 	for (t = strtok(src, ","); t; t = strtok(NULL, ",")) {
-		if (hplength + 1 >= n) {
-			if (!(hpitems = realloc(hpitems, (n += 8) * sizeof *hpitems)))
-				die("Unable to realloc %zu bytes\n", n * sizeof *hpitems);
-		}
+		if (hplength + 1 >= n)
+			hpitems = erealloc(hpitems, (n += 8) * sizeof *hpitems);
 		hpitems[hplength++] = t;
 	}
 }
@@ -423,9 +421,8 @@ fuzzymatch(void)
 
 	if (number_of_matches) {
 		/* initialize array with matches */
-		if (!(fuzzymatches = realloc(fuzzymatches,
-		                             number_of_matches * sizeof(struct item *))))
-			die("cannot realloc %u bytes:", number_of_matches * sizeof(struct item *));
+		fuzzymatches = erealloc(fuzzymatches,
+		                        number_of_matches * sizeof(struct item *));
 		for (i = 0, it = matches; it && i < number_of_matches; ++i, it = it->right)
 			fuzzymatches[i] = it;
 		/* sort matches according to distance */
@@ -459,8 +456,8 @@ match(void)
 	strcpy(buf, text);
 	/* separate input text into tokens to be matched individually */
 	for (s = strtok(buf, " "); s; tokv[tokc - 1] = s, s = strtok(NULL, " "))
-		if (++tokc > tokn && !(tokv = realloc(tokv, ++tokn * sizeof *tokv)))
-			die("cannot realloc %zu bytes:", tokn * sizeof *tokv);
+		if (++tokc > tokn)
+			tokv = erealloc(tokv, ++tokn * sizeof *tokv);
 	len = tokc ? strlen(tokv[0]) : 0;
 
 	matches = lhpprefix = lprefix = lsubstr = matchend = hpprefixend = prefixend = substrend = NULL;
@@ -960,8 +957,7 @@ readstdin(void)
 	for (i = 0; (len = getline(&line, &linesiz, stdin)) != -1; i++) {
 		if (i + 1 >= itemsiz) {
 			itemsiz += 256;
-			if (!(items = realloc(items, itemsiz * sizeof(*items))))
-				die("cannot realloc %zu bytes:", itemsiz * sizeof(*items));
+			items = erealloc(items, itemsiz * sizeof(*items));
 		}
 		char *tab;
 		items[i] = (struct item){0};

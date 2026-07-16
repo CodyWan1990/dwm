@@ -47,7 +47,7 @@ extern char *argv0;
 
 /* macros */
 #define IS_SET(flag)		((term.mode & (flag)) != 0)
-#define ISCONTROLC0(c)		(BETWEEN(c, 0, 0x1f) || (c) == 0x7f)
+#define ISCONTROLC0(c)		((c) <= 0x1f || (c) == 0x7f)
 #define ISCONTROLC1(c)		(BETWEEN(c, 0x80, 0x9f))
 #define ISCONTROL(c)		(ISCONTROLC0(c) || ISCONTROLC1(c))
 #define ISDELIM(u)		(u && wcschr(worddelimiters, u))
@@ -228,8 +228,6 @@ static Rune utf8decodebyte(char, size_t *);
 static char utf8encodebyte(Rune, size_t);
 static size_t utf8validate(Rune *, size_t);
 
-static char base64dec_getc(const char **);
-
 static ssize_t xwrite(int, const char *, size_t);
 
 /* Globals */
@@ -240,6 +238,7 @@ static STREscape strescseq;
 static int iofd = 1;
 static int cmdfd;
 static pid_t pid;
+static volatile sig_atomic_t shuttingdown;
 
 static const uchar utfbyte[UTF_SIZ + 1] = {0x80,    0, 0xC0, 0xE0, 0xF0};
 static const uchar utfmask[UTF_SIZ + 1] = {0xC0, 0x80, 0xE0, 0xF0, 0xF8};
@@ -447,10 +446,14 @@ sb_resize(int col)
 		while (cursor < logical_len) {
 			nl = xmalloc(col * sizeof(Glyph));
 			for (j = 0; j < col; j++) {
-				nl[j].fg = defaultfg;
-				nl[j].bg = defaultbg;
-				nl[j].mode = 0;
-				nl[j].u = ' ';
+				nl[j] = (Glyph){
+					.u = ' ',
+					.fg = defaultfg,
+					.bg = defaultbg,
+					.decor = DECOR_DEFAULT_COLOR,
+					.ustyle = -1,
+					.ucolor = {-1, -1, -1},
+				};
 			}
 
 			copy_width = logical_len - cursor;
@@ -738,50 +741,66 @@ utf8validate(Rune *u, size_t i)
 	return i;
 }
 
-char
-base64dec_getc(const char **src)
-{
-	while (**src && !isprint((unsigned char)**src))
-		(*src)++;
-	return **src ? *((*src)++) : '=';  /* emulate padding if string ends */
-}
-
 char *
-base64dec(const char *src)
+base64dec(const char *src, size_t *size)
 {
-	size_t in_len = strlen(src);
+	size_t in_len, groups, out_cap;
 	char *result, *dst;
-	static const char base64_digits[256] = {
-		[43] = 62, 0, 0, 0, 63, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61,
-		0, 0, 0, -1, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
-		13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 0, 0, 0, 0,
-		0, 0, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39,
-		40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51
-	};
+	int accum = 0, bits = 0, padding = 0;
+	unsigned char ch;
 
-	if (in_len % 4)
-		in_len += 4 - (in_len % 4);
-	result = dst = xmalloc(in_len / 4 * 3 + 1);
-	while (*src) {
-		int a = base64_digits[(unsigned char) base64dec_getc(&src)];
-		int b = base64_digits[(unsigned char) base64dec_getc(&src)];
-		int c = base64_digits[(unsigned char) base64dec_getc(&src)];
-		int d = base64_digits[(unsigned char) base64dec_getc(&src)];
+	in_len = strlen(src);
+	groups = in_len / 4 + (in_len % 4 != 0);
+	if (groups > (SIZE_MAX - 1) / 3)
+		return NULL;
+	out_cap = groups * 3 + 1;
+	result = dst = xmalloc(out_cap);
+	while ((ch = (unsigned char)*src++)) {
+		int value;
 
-		/* invalid input. 'a' can be -1, e.g. if src is "\n" (c-str) */
-		if (a == -1 || b == -1)
-			break;
+		if (isspace(ch))
+			continue;
+		if (ch == '=') {
+			padding++;
+			continue;
+		}
+		if (padding)
+			goto invalid;
+		if (ch >= 'A' && ch <= 'Z')
+			value = ch - 'A';
+		else if (ch >= 'a' && ch <= 'z')
+			value = ch - 'a' + 26;
+		else if (ch >= '0' && ch <= '9')
+			value = ch - '0' + 52;
+		else if (ch == '+')
+			value = 62;
+		else if (ch == '/')
+			value = 63;
+		else
+			goto invalid;
 
-		*dst++ = (a << 2) | ((b & 0x30) >> 4);
-		if (c == -1)
-			break;
-		*dst++ = ((b & 0x0f) << 4) | ((c & 0x3c) >> 2);
-		if (d == -1)
-			break;
-		*dst++ = ((c & 0x03) << 6) | d;
+		accum = (accum << 6) | value;
+		bits += 6;
+		if (bits >= 8) {
+			bits -= 8;
+			*dst++ = (char)(accum >> bits);
+			accum &= (1 << bits) - 1;
+		}
 	}
+	if (padding > 2 || bits == 6 ||
+	    (padding == 1 && bits != 2) ||
+	    (padding == 2 && bits != 4) || accum != 0)
+		goto invalid;
 	*dst = '\0';
+	if (size)
+		*size = (size_t)(dst - result);
 	return result;
+
+invalid:
+	free(result);
+	if (size)
+		*size = 0;
+	return NULL;
 }
 
 void
@@ -1122,6 +1141,7 @@ sigchld(int a)
 {
 	int stat;
 	pid_t p;
+	(void)a;
 
 	if ((p = waitpid(-1, &stat, WNOHANG)) < 0)
 		die("waiting for pid %hd failed: %s\n", pid, strerror(errno));
@@ -1131,6 +1151,8 @@ sigchld(int a)
 		signal(SIGCHLD, sigchld);
 		return;
 	}
+	if (shuttingdown)
+		return;
 
 	if (WIFEXITED(stat) && WEXITSTATUS(stat))
 		die("child exited with status %d\n", WEXITSTATUS(stat));
@@ -1234,7 +1256,7 @@ ttyread(void)
 	static int already_processing = 0;
 	int ret, written = 0;
 
-	if (buflen >= LEN(buf))
+	if ((size_t)buflen >= LEN(buf))
 		return 0;
 
 	/* append read bytes to unprocessed bytes */
@@ -1245,6 +1267,7 @@ ttyread(void)
 		exit(0);
 	case -1:
 		die("couldn't read from shell: %s\n", strerror(errno));
+		return 0;
 	default:
 		buflen += ret;
 		if (already_processing) {
@@ -1344,7 +1367,7 @@ ttywriteraw(const char *s, size_t n)
 			 */
 			if ((r = write(cmdfd, s, (n < lim)? n : lim)) < 0)
 				goto write_error;
-			if (r < n) {
+			if ((size_t)r < n) {
 				/*
 				 * We weren't able to write out everything.
 				 * This means the buffer is getting full
@@ -1390,6 +1413,7 @@ void
 ttyhangup(void)
 {
 	/* Send SIGHUP to shell */
+	shuttingdown = 1;
 	kill(pid, SIGHUP);
 }
 
@@ -1460,7 +1484,7 @@ tcursor(int mode)
 void
 treset(void)
 {
-	uint i;
+	int i;
 
 	term.c = (TCursor){{
 		.mode = ATTR_NULL,
@@ -1470,7 +1494,7 @@ treset(void)
 	}, .x = 0, .y = 0, .state = CURSOR_DEFAULT};
 
 	memset(term.tabs, 0, term.col * sizeof(*term.tabs));
-	for (i = tabspaces; i < term.col; i += tabspaces)
+	for (i = (int)tabspaces; i < term.col; i += (int)tabspaces)
 		term.tabs[i] = 1;
 	term.top = 0;
 	term.bot = term.row - 1;
@@ -1481,7 +1505,7 @@ treset(void)
 	for (i = 0; i < 2; i++) {
 		tmoveto(0, 0);
 		tcursor(CURSOR_SAVE);
-		if (term.col > 0 && term.row > 0 && term.line > 0)
+		if (term.col > 0 && term.row > 0 && term.line != NULL)
 			tclearregion(0, 0, term.col-1, term.row-1);
 		tswapscreen();
 	}
@@ -1953,7 +1977,7 @@ int32_t
 tdefcolor(const int *attr, int *npar, int l)
 {
 	int32_t idx = -1;
-	uint r, g, b;
+	int r, g, b;
 
 	switch (attr[*npar + 1]) {
 	case 2: /* direct color in RGB space */
@@ -1968,7 +1992,7 @@ tdefcolor(const int *attr, int *npar, int l)
 		b = attr[*npar + 4];
 		*npar += 4;
 		if (!BETWEEN(r, 0, 255) || !BETWEEN(g, 0, 255) || !BETWEEN(b, 0, 255))
-			fprintf(stderr, "erresc: bad rgb color (%u,%u,%u)\n",
+			fprintf(stderr, "erresc: bad rgb color (%d,%d,%d)\n",
 				r, g, b);
 		else
 			idx = TRUECOLOR(r, g, b);
@@ -2618,7 +2642,7 @@ osc_color_response(int num, int index, int is_osc4)
 
 	n = snprintf(buf, sizeof buf, "\033]%s%d;rgb:%02x%02x/%02x%02x/%02x%02x\007",
 	             is_osc4 ? "4;" : "", num, r, r, g, g, b, b);
-	if (n < 0 || n >= sizeof(buf)) {
+	if (n < 0 || n >= (int)sizeof(buf)) {
 		fprintf(stderr, "error: %s while printing %s response\n",
 		        n < 0 ? "snprintf failed" : "truncation occurred",
 		        is_osc4 ? "osc4" : "osc");
@@ -2661,7 +2685,7 @@ strhandle(void)
 			return;
 		case 52: /* manipulate selection data */
 			if (narg > 2 && allowwindowops) {
-				dec = base64dec(strescseq.args[2]);
+				dec = base64dec(strescseq.args[2], NULL);
 				if (dec) {
 					xsetsel(dec);
 					xclipcopy();
@@ -2676,7 +2700,7 @@ strhandle(void)
 			if (narg < 2)
 				break;
 			p = strescseq.args[1];
-			if ((j = par - 10) < 0 || j >= LEN(osc_table))
+			if ((j = par - 10) < 0 || j >= (int)LEN(osc_table))
 				break; /* shouldn't be possible */
 
 			if (!strcmp(p, "?")) {
@@ -2736,7 +2760,7 @@ strhandle(void)
 		case 112: /* reset dynamic text cursor color */
 			if (narg != 1)
 				break;
-			if ((j = par - 110) < 0 || j >= LEN(osc_table))
+			if ((j = par - 110) < 0 || j >= (int)LEN(osc_table))
 				break; /* shouldn't be possible */
 			if (xsetcolorname(osc_table[j].idx, NULL)) {
 				fprintf(stderr, "erresc: %s color not found\n", osc_table[j].str);
@@ -2839,6 +2863,7 @@ strreset(void)
 void
 sendbreak(const Arg *arg)
 {
+	(void)arg;
 	if (tcsendbreak(cmdfd, 0))
 		perror("Error sending break");
 }
@@ -2856,18 +2881,21 @@ tprinter(char *s, size_t len)
 void
 toggleprinter(const Arg *arg)
 {
+	(void)arg;
 	term.mode ^= MODE_PRINT;
 }
 
 void
 printscreen(const Arg *arg)
 {
+	(void)arg;
 	tdump();
 }
 
 void
 printsel(const Arg *arg)
 {
+	(void)arg;
 	tdumpsel();
 }
 
@@ -2891,8 +2919,10 @@ tdumpline(int n)
 	bp = &term.line[n][0];
 	end = &bp[MIN(tlinelen_render(n), term.col) - 1];
 	if (bp != end || bp->u != ' ') {
-		for ( ; bp <= end; ++bp)
-			tprinter(buf, utf8encode(bp->u, buf));
+		for ( ; bp <= end; ++bp) {
+			size_t len = utf8encode(bp->u, buf);
+			tprinter(buf, len);
+		}
 	}
 	tprinter("\n", 1);
 }
@@ -2909,7 +2939,7 @@ tdump(void)
 void
 tputtab(int n)
 {
-	uint x = term.c.x;
+	int x = term.c.x;
 
 	if (n > 0) {
 		while (x < term.col && n--)
@@ -3436,7 +3466,7 @@ tresize(int col, int row)
 	int pop_width = 0;
 	int needs_reflow = 0;
 	int is_alt = IS_SET(MODE_ALTSCREEN);
-	Line *tmp;
+	Line *tmp, *saved_alt = NULL;
 
 	if (col < 1 || row < 1) {
 		fprintf(stderr,
@@ -3447,7 +3477,34 @@ tresize(int col, int row)
 	if (sel.ob.x != -1)
 		selclear();
 
-	/* Operate on the currently visible screen buffer. */
+	/* Preserve the visible alternate screen while the normal screen reflows. */
+	if (is_alt && term.row > 0 && term.col > 0) {
+		saved_alt = xmalloc((size_t)row * sizeof(Line));
+		for (i = 0; i < row; i++) {
+			saved_alt[i] = xmalloc((size_t)col * sizeof(Glyph));
+			for (j = 0; j < col; j++) {
+				saved_alt[i][j] = (Glyph){
+					.u = ' ', .fg = defaultfg, .bg = defaultbg,
+					.decor = DECOR_DEFAULT_COLOR, .ustyle = -1,
+					.ucolor = {-1, -1, -1},
+				};
+				if (i < term.row && j < term.col) {
+					saved_alt[i][j] = term.line[i][j];
+					if ((saved_alt[i][j].mode & ATTR_IMAGE) &&
+					    tgetisclassicplaceholder(&saved_alt[i][j]))
+						saved_alt[i][j] = (Glyph){
+							.u = ' ', .fg = defaultfg,
+							.bg = defaultbg,
+							.decor = DECOR_DEFAULT_COLOR,
+							.ustyle = -1,
+							.ucolor = {-1, -1, -1},
+						};
+				}
+			}
+		}
+	}
+
+	/* Operate on the hidden normal screen while an alternate screen is active. */
 	if (is_alt) {
 		tmp = term.line;
 		term.line = term.alt;
@@ -3548,6 +3605,12 @@ tresize(int col, int row)
 		tmp = term.line;
 		term.line = term.alt;
 		term.alt = tmp;
+		if (saved_alt) {
+			for (i = 0; i < term.row; i++)
+				free(term.line[i]);
+			free(term.line);
+			term.line = saved_alt;
+		}
 	}
 	if (!is_alt && old_row > 0) {
 		term.c.y += (loaded - save_end);
@@ -3641,11 +3704,21 @@ chdir_by_pid(pid_t cpid)
 void
 newterm(const Arg *a)
 {
-	switch (fork()) {
+	pid_t helper, waited;
+	sigset_t block, oldmask;
+
+	(void)a;
+	sigemptyset(&block);
+	sigaddset(&block, SIGCHLD);
+	if (sigprocmask(SIG_BLOCK, &block, &oldmask) < 0)
+		die("sigprocmask failed: %s\n", strerror(errno));
+	switch (helper = fork()) {
 	case -1:
 		die("fork failed: %s\n", strerror(errno));
 		break;
 	case 0:
+		if (sigprocmask(SIG_SETMASK, &oldmask, NULL) < 0)
+			_exit(1);
 		switch (fork()) {
 		case -1:
 			fprintf(stderr, "fork failed: %s\n", strerror(errno));
@@ -3660,13 +3733,19 @@ newterm(const Arg *a)
 			_exit(0);
 		}
 	default:
-		wait(NULL);
+		do {
+			waited = waitpid(helper, NULL, 0);
+		} while (waited < 0 && errno == EINTR);
+		if (waited < 0)
+			fprintf(stderr, "waitpid failed: %s\n", strerror(errno));
+		if (sigprocmask(SIG_SETMASK, &oldmask, NULL) < 0)
+			fprintf(stderr, "sigprocmask failed: %s\n",
+				strerror(errno));
 	}
 }
 
-/* select and copy the previous url on screen (do nothing if there's no url).
- * known bug: doesn't handle urls that span multiple lines (wontfix)
- * known bug: only finds first url on line (mightfix)
+/* Select and copy the previous URL on screen (do nothing if there is none).
+ * URLs that span multiple lines are not supported.
  */
 void
 copyurl(const Arg *arg)
@@ -3674,26 +3753,36 @@ copyurl(const Arg *arg)
 	static char URLCHARS[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 		"abcdefghijklmnopqrstuvwxyz"
 		"0123456789-._~:/?#@!$&'*+,;=%";
-	int i, row, startrow;
-	char *linestr = calloc(sizeof(char), term.col + 1);
-	char *c, *match = NULL;
+	int i, row, startrow, limit;
+	char *linestr = xmalloc((size_t)term.col + 1);
+	char *c, *candidate, *match = NULL;
+	Line line;
 
-	row = (sel.ob.x >= 0 && sel.nb.y > 0) ? sel.nb.y - 1 : term.bot;
+	(void)arg;
+	row = sel.ob.x >= 0 ? sel.nb.y : term.bot;
 	LIMIT(row, term.top, term.bot);
+	limit = sel.ob.x >= 0 ? sel.nb.x - 1 : term.col - 1;
 	startrow = row;
 
 	do {
+		line = renderline(row);
 		for (i = 0; i < term.col; ++i) {
-			if (term.line[row][i].u > 127)
-				continue;
-			linestr[i] = term.line[row][i].u;
+			linestr[i] = line[i].u <= 127 ? (char)line[i].u : ' ';
 		}
 		linestr[term.col] = '\0';
-		if ((match = strstr(linestr, "http://"))
-				|| (match = strstr(linestr, "https://")))
+		for (candidate = linestr; (candidate = strstr(candidate, "http://"));
+		     candidate++)
+			if (candidate - linestr <= limit)
+				match = candidate;
+		for (candidate = linestr; (candidate = strstr(candidate, "https://"));
+		     candidate++)
+			if (candidate - linestr <= limit && (!match || candidate > match))
+				match = candidate;
+		if (match)
 			break;
 		if (--row < term.top)
 			row = term.bot;
+		limit = term.col - 1;
 	} while (row != startrow);
 
 	if (match) {

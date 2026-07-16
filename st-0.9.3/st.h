@@ -101,7 +101,7 @@ typedef union {
 	const char *s;
 } Arg;
 
-void die(const char *, ...);
+void die(const char *, ...) __attribute__((format(printf, 1, 2)));
 void redraw(void);
 void draw(void);
 
@@ -138,6 +138,7 @@ size_t utf8encode(Rune, char *);
 
 void *xmalloc(size_t);
 void *xrealloc(void *, size_t);
+char *base64dec(const char *, size_t *);
 char *xstrdup(const char *);
 
 void kscrollup(const Arg *arg);

@@ -26,6 +26,10 @@ $(OBJ): config.h config.mk
 st: $(OBJ)
 	$(CC) -o $@ $(OBJ) $(STLDFLAGS)
 
+check:
+	$(MAKE) clean
+	$(MAKE) WARNFLAGS="$(WARNFLAGS) -Werror" st
+
 clean:
 	rm -f st $(OBJ) st-$(VERSION).tar.gz
 
@@ -51,4 +55,4 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/bin/st
 	rm -f $(DESTDIR)$(MANPREFIX)/man1/st.1
 
-.PHONY: all clean dist install uninstall
+.PHONY: all check clean dist install uninstall

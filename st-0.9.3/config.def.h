@@ -6,6 +6,11 @@
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
 static char *font = "Monofur Nerd Font Mono:style=bold:pixelsize=16, Liberation Mono:pixelsize=12:antialias=true:autohint=true";
+/* Spare fonts: searched in order when the primary font lacks a glyph. */
+static char *font2[] = {
+	"Symbols Nerd Font Mono:pixelsize=16",
+	"Noto Color Emoji:pixelsize=14",
+};
 static int borderpx = 20;
 
 /* How to align the content in the window when the size of the terminal
@@ -235,13 +240,13 @@ static uint forcemousemod = ShiftMask;
  */
 static MouseShortcut mshortcuts[] = {
 	/* mask                 button   function        argument       release */
-	{ TERMMOD,              Button3, previewimage,   {.s = "feh"} },
+	{ TERMMOD,              Button3, previewimage,   {.s = "feh"}, 0 },
 	{ TERMMOD,              Button2, showimageinfo,  {},            1 },
 	{ XK_ANY_MOD,           Button2, selpaste,       {.i = 0},      1 },
-	{ ShiftMask,            Button4, ttysend,        {.s = "\033[5;2~"} },
-	{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"} },
-	{ ShiftMask,            Button5, ttysend,        {.s = "\033[6;2~"} },
-	{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"} },
+	{ ShiftMask,            Button4, ttysend,        {.s = "\033[5;2~"}, 0 },
+	{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"}, 0 },
+	{ ShiftMask,            Button5, ttysend,        {.s = "\033[6;2~"}, 0 },
+	{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"}, 0 },
 };
 
 static Shortcut shortcuts[] = {
@@ -257,6 +262,10 @@ static Shortcut shortcuts[] = {
 	{ TERMMOD,              XK_Prior,       zoom,           {.f = +1} },
 	{ TERMMOD,              XK_Next,        zoom,           {.f = -1} },
 	{ TERMMOD,              XK_Home,        zoomreset,      {.f =  0} },
+	{ ControlMask,          XK_plus,        zoom,           {.f = +1} },
+	{ ControlMask,          XK_equal,       zoom,           {.f = +1} },
+	{ ControlMask,          XK_minus,       zoom,           {.f = -1} },
+	{ ControlMask,          XK_0,           zoomreset,      {.f =  0} },
 	{ TERMMOD,              XK_C,           clipcopy,       {.i =  0} },
 	{ TERMMOD,              XK_V,           clippaste,      {.i =  0} },
 	{ TERMMOD,              XK_Y,           selpaste,       {.i =  0} },
@@ -266,6 +275,8 @@ static Shortcut shortcuts[] = {
 	{ TERMMOD,              XK_F6,          dumpgrstate,    {.i =  0} },
 	{ TERMMOD,              XK_F7,          unloadimages,   {.i =  0} },
 	{ TERMMOD,              XK_F8,          toggleimages,   {.i =  0} },
+	{ TERMMOD,              XK_L,           copyurl,        {.i =  0} },
+	{ TERMMOD,              XK_Return,      newterm,        {.i =  0} },
 };
 
 /*

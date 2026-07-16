@@ -806,7 +806,8 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 		if (ps->o.animations &&
 			!isnan(w->animation_progress) && w->animation_progress <= 0.999999999 &&
 			ps->o.wintype_option[w->window_type].animation != 0 &&
-			win_is_mapped_in_x(w))
+			(w->state == WSTATE_MAPPING || w->state == WSTATE_FADING ||
+			 w->state == WSTATE_MAPPED))
 		{
 			double neg_displacement_x =
 				w->animation_dest_center_x - w->animation_center_x;
@@ -1070,6 +1071,11 @@ paint_preprocess(session_t *ps, bool *fade_running, bool *animation_running) {
 		} else if (unlikely((w->flags & WIN_FLAGS_IMAGE_ERROR) != 0)) {
 			log_trace("Window %#010x (%s) will not be painted because it has "
 			          "image errors",
+			          w->base.id, w->name);
+			to_paint = false;
+		} else if (unlikely(!w->win_image)) {
+			log_trace("Window %#010x (%s) will not be painted because it has "
+			          "no window image",
 			          w->base.id, w->name);
 			to_paint = false;
 		}
@@ -2898,6 +2904,7 @@ static void session_destroy(session_t *ps) {
 #ifdef DEBUG_XRC
 	// Report about resource leakage
 	xrc_report_xid();
+	xrc_clear_xid();
 #endif
 
 	// Stop libev event handlers
